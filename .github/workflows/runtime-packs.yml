@@ -19,7 +19,12 @@ permissions:
 env:
   # Pinned so a pack is reproducible: an unpinned upstream would silently
   # change what ships inside an installed runtime.
-  GL4ES_REF: c9895df34cd466c23bc60c2bd3db3d87e98fcbe7 # v1.1.6
+  #
+  # Not the v1.1.6 tag: that release declares cmake_minimum_required(2.8.12)
+  # with no upper bound, which leaves CMP0057 at OLD and makes the NDK's own
+  # toolchain file fail on its use of IN_LIST. This commit declares the
+  # 2.8.12...3.10 range, which turns the policy on.
+  GL4ES_REF: 81547d986798e876de8b434193920b606a72363f
   ANDROID_API: "31"
   ANDROID_ABI: arm64-v8a
 
@@ -65,6 +70,7 @@ jobs:
             -DUSE_ANDROID_LOG=ON \
             -DEGL_WRAPPER=ON \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POLICY_DEFAULT_CMP0057=NEW \
             -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384"
 
       - name: Build
