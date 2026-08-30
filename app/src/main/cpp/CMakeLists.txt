@@ -2,6 +2,11 @@ cmake_minimum_required(VERSION 3.22.1)
 
 project(nikprobe C)
 
+# Pinned rather than left to the compiler's default: the bridge uses POSIX
+# clock_gettime, which a strict C11 dialect hides.
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_EXTENSIONS ON)
+
 # The Phase 2 probe. It answers, on the real device, the questions that decide
 # whether NikLauncher's whole runtime design is viable:
 #   - can we dlopen() a shared object from the app's own data directory?
@@ -23,3 +28,21 @@ target_link_libraries(nikprobe ${log-lib})
 add_library(nikjvm SHARED nikjvm.c)
 target_link_options(nikjvm PRIVATE "-Wl,-z,max-page-size=16384")
 target_link_libraries(nikjvm ${log-lib})
+
+# The GLFW bridge. LWJGL resolves the GLFW 3 ABI by name out of a libglfw.so,
+# so this library must be named exactly that - the file name is part of the
+# contract, not a choice. It implements that ABI over EGL, an ANativeWindow and
+# the event core, which is the only way Minecraft's input and windowing can
+# work on a platform that has no GLFW.
+add_library(glfw SHARED
+    glfw/nikglfw_core.c
+    glfw/nikglfw_api.c
+    glfw/nikglfw_jni.c
+)
+
+target_link_options(glfw PRIVATE "-Wl,-z,max-page-size=16384")
+
+find_library(egl-lib EGL)
+find_library(gles-lib GLESv2)
+find_library(android-lib android)
+target_link_libraries(glfw ${egl-lib} ${gles-lib} ${android-lib} ${log-lib})
