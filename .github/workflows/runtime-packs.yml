@@ -54,8 +54,15 @@ jobs:
           git checkout "$GL4ES_REF"
           echo "Building gl4es at $(git rev-parse --short HEAD)"
 
-      # NOX11 and the EGL wrapper are what make this usable on Android: there is
-      # no X server, and the context has to come from EGL on a SurfaceView.
+      # NOX11 is what makes this usable on Android: there is no X server.
+      #
+      # The EGL wrapper is deliberately off. It exists so a program calling EGL
+      # directly gets gl4es's shims, but NikLauncher's GLFW bridge creates the
+      # EGL context itself against the SurfaceView and then hands the current
+      # context to libGL. Wrapping EGL as well would duplicate that layer - and
+      # it does not even link under NOX11, since the wrapper needs a GLX symbol
+      # that NOX11 leaves out of the build.
+      #
       # The 16 KB max page size keeps the object loadable on Android 15 kernels
       # that moved off 4 KB pages.
       - name: Configure
@@ -68,7 +75,7 @@ jobs:
             -DANDROID=ON \
             -DNOX11=ON \
             -DUSE_ANDROID_LOG=ON \
-            -DEGL_WRAPPER=ON \
+            -DEGL_WRAPPER=OFF \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_POLICY_DEFAULT_CMP0057=NEW \
             -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384"
@@ -80,9 +87,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out/gl4es
-          found=$(find upstream-gl4es -name 'libGL.so*' -o -name 'libEGL.so*' | sort)
+          found=$(find upstream-gl4es -name 'libGL.so*' | sort)
           if [ -z "$found" ]; then
-            echo "gl4es produced no shared object" >&2
+            echo "gl4es produced no libGL" >&2
             find upstream-gl4es -name '*.so*' | head -20 >&2
             exit 1
           fi
