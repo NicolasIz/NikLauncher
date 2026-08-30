@@ -34,6 +34,11 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # The GLFW bridge core is written free of Android headers so it can be
+      # checked here in seconds, rather than on a device after a full build.
+      - name: Test the native core
+        run: ./tools/run-native-tests.sh
+
       # :core holds the version resolution, download and launch logic, and is
       # pure Kotlin/JVM so it can be tested without a device or an emulator.
       - name: Test :core
