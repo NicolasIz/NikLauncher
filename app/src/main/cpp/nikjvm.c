@@ -25,6 +25,14 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
+/*
+ * Android's jni.h stops at JNI_VERSION_1_6, because that is what ART
+ * implements. We are not talking to ART: JNI_CreateJavaVM here belongs to the
+ * desktop OpenJDK inside the runtime pack, which does understand 1.8. So the
+ * constant has to be defined locally rather than taken from the NDK header.
+ */
+#define NIK_JNI_VERSION_1_8 0x00010008
+
 typedef jint (*CreateJavaVM)(JavaVM **, void **, void *);
 
 static void *g_jvm_handle = NULL;
@@ -99,7 +107,7 @@ Java_com_niklauncher_app_runtime_JvmBridge_nativeCreateJvm(
     }
 
     JavaVMInitArgs args;
-    args.version = JNI_VERSION_1_8;
+    args.version = NIK_JNI_VERSION_1_8;
     args.nOptions = option_count;
     args.options = options;
     args.ignoreUnrecognized = JNI_FALSE;
@@ -108,7 +116,7 @@ Java_com_niklauncher_app_runtime_JvmBridge_nativeCreateJvm(
     jint result = create(&g_jvm, (void **) &g_jvm_env, &args);
 
     for (jsize i = 0; i < option_count; i++) {
-        free(options[i].optionString);
+        free((void *) options[i].optionString);
     }
     free(options);
 

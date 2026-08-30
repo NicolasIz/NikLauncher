@@ -6,7 +6,7 @@ import androidx.compose.material.icons.filled.Gamepad
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Widgets
-import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -36,7 +36,7 @@ private enum class Destination(
     val icon: ImageVector,
 ) {
     INSTANCES("instances", R.string.nav_instances, Icons.Filled.Widgets),
-    VERSIONS("versions", R.string.nav_versions, Icons.Filled.ViewList),
+    VERSIONS("versions", R.string.nav_versions, Icons.AutoMirrored.Filled.ViewList),
     CONTROLS("controls", R.string.nav_controls, Icons.Filled.Gamepad),
     DIAGNOSTICS("diagnostics", R.string.nav_diagnostics, Icons.Filled.Science),
     SETTINGS("settings", R.string.nav_settings, Icons.Filled.Settings),
