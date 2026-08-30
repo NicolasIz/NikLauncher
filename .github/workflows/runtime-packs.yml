@@ -1,0 +1,137 @@
+name: Runtime packs
+
+# Builds the native components NikLauncher cannot write in Kotlin, from their
+# own upstream sources rather than by repackaging someone else's binaries.
+#
+# Run manually: these builds are slow and their inputs change rarely, so tying
+# them to every push would waste minutes without catching anything.
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish the built components as a pre-release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  # Pinned so a pack is reproducible: an unpinned upstream would silently
+  # change what ships inside an installed runtime.
+  GL4ES_REF: c9895df34cd466c23bc60c2bd3db3d87e98fcbe7 # v1.1.6
+  ANDROID_API: "31"
+  ANDROID_ABI: arm64-v8a
+
+jobs:
+  gl4es:
+    name: Build gl4es (OpenGL 2.1 over GLES)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out NikLauncher
+        uses: actions/checkout@v4
+
+      - name: Set up the Android SDK and NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install the NDK
+        run: |
+          set -euo pipefail
+          sdkmanager --install "ndk;27.0.12077973" >/dev/null
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
+
+      - name: Fetch gl4es
+        run: |
+          set -euo pipefail
+          git clone https://github.com/ptitSeb/gl4es.git upstream-gl4es
+          cd upstream-gl4es
+          git checkout "$GL4ES_REF"
+          echo "Building gl4es at $(git rev-parse --short HEAD)"
+
+      # NOX11 and the EGL wrapper are what make this usable on Android: there is
+      # no X server, and the context has to come from EGL on a SurfaceView.
+      # The 16 KB max page size keeps the object loadable on Android 15 kernels
+      # that moved off 4 KB pages.
+      - name: Configure
+        run: |
+          set -euo pipefail
+          cmake -S upstream-gl4es -B upstream-gl4es/build \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI="$ANDROID_ABI" \
+            -DANDROID_PLATFORM="android-$ANDROID_API" \
+            -DANDROID=ON \
+            -DNOX11=ON \
+            -DUSE_ANDROID_LOG=ON \
+            -DEGL_WRAPPER=ON \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384"
+
+      - name: Build
+        run: cmake --build upstream-gl4es/build --parallel "$(nproc)"
+
+      - name: Collect the shared objects
+        run: |
+          set -euo pipefail
+          mkdir -p out/gl4es
+          found=$(find upstream-gl4es -name 'libGL.so*' -o -name 'libEGL.so*' | sort)
+          if [ -z "$found" ]; then
+            echo "gl4es produced no shared object" >&2
+            find upstream-gl4es -name '*.so*' | head -20 >&2
+            exit 1
+          fi
+          for lib in $found; do
+            # Strip the .so.1 versioning: Android's loader wants a plain name.
+            base=$(basename "$lib" | sed 's/\.so\..*/.so/')
+            cp -v "$lib" "out/gl4es/$base"
+          done
+          ls -la out/gl4es
+
+      - name: Verify the objects are 16 KB aligned and arm64
+        run: |
+          set -euo pipefail
+          readelf=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf
+          for lib in out/gl4es/*.so; do
+            echo "--- $lib"
+            "$readelf" -h "$lib" | grep -E "Machine|Class"
+            # Every PT_LOAD must be aligned to at least 16 KB (0x4000).
+            aligns=$("$readelf" -l "$lib" | awk '/LOAD/ {print $NF}')
+            for align in $aligns; do
+              value=$((align))
+              if [ "$value" -lt 16384 ]; then
+                echo "PT_LOAD alignment $align is below 16 KB in $lib" >&2
+                exit 1
+              fi
+            done
+            echo "alignment ok: $aligns"
+          done
+
+      - name: Describe the component
+        run: |
+          set -euo pipefail
+          cat > out/gl4es/component.json <<JSON
+          {
+            "id": "gl4es",
+            "backendId": "gl4es",
+            "upstream": "https://github.com/ptitSeb/gl4es",
+            "upstreamRef": "${GL4ES_REF}",
+            "license": "MIT",
+            "abi": "${ANDROID_ABI}",
+            "minSdk": ${ANDROID_API},
+            "maxPageSizeBytes": 16384
+          }
+          JSON
+          cat out/gl4es/component.json
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          (cd out && tar -czf gl4es-${ANDROID_ABI}.tar.gz gl4es)
+          sha1sum out/gl4es-${ANDROID_ABI}.tar.gz | tee out/gl4es-${ANDROID_ABI}.tar.gz.sha1
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: gl4es-${{ env.ANDROID_ABI }}
+          path: out/gl4es-*.tar.gz*
+          if-no-files-found: error
