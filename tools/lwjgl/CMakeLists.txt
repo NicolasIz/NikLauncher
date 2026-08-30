@@ -56,8 +56,16 @@ list(APPEND CORE_SOURCES
 )
 
 # Generated glue for Linux. Android is Linux with Bionic rather than glibc, so
-# most of this applies; io_uring is deliberately left out, because Bionic does
-# not ship its headers and Android's seccomp policy blocks the syscalls anyway.
+# most of this applies, but two bindings are deliberately left out.
+#
+# io_uring: Bionic ships no headers for it, and Android's seccomp policy blocks
+# the syscalls regardless.
+#
+# UIO: vectored and cross-process I/O. Bionic hides preadv/pwritev behind
+# feature-test macros, and process_vm_readv/writev are blocked between
+# processes on Android anyway. Nothing in Minecraft's path calls them, and
+# LWJGL resolves these natives lazily - an absent binding only fails if
+# something actually invokes it.
 list(APPEND CORE_SOURCES
     ${CORE}/generated/c/linux/org_lwjgl_system_linux_DynamicLinkLoader.c
     ${CORE}/generated/c/linux/org_lwjgl_system_linux_FCNTL.c
@@ -65,7 +73,6 @@ list(APPEND CORE_SOURCES
     ${CORE}/generated/c/linux/org_lwjgl_system_linux_PThread.c
     ${CORE}/generated/c/linux/org_lwjgl_system_linux_Socket.c
     ${CORE}/generated/c/linux/org_lwjgl_system_linux_Stat.c
-    ${CORE}/generated/c/linux/org_lwjgl_system_linux_UIO.c
     ${CORE}/generated/c/linux/org_lwjgl_system_linux_UNISTD.c
 )
 
