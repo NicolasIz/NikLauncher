@@ -24,6 +24,20 @@ android {
         ndk {
             abiFilters += "arm64-v8a"
         }
+
+        externalNativeBuild {
+            cmake {
+                arguments += "-DANDROID_STL=none"
+                abiFilters("arm64-v8a")
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     buildTypes {
@@ -51,6 +65,11 @@ android {
     }
 
     packaging {
+        jniLibs {
+            // Native libraries have to exist as real files so they can be
+            // dlopen()ed by path; the runtime packs will need the same.
+            useLegacyPackaging = true
+        }
         resources {
             excludes += setOf(
                 "/META-INF/{AL2.0,LGPL2.1}",

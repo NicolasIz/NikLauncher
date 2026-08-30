@@ -2,6 +2,10 @@ package com.niklauncher.app.data
 
 import android.content.Context
 import com.niklauncher.core.download.Downloader
+import com.niklauncher.core.install.GameInstaller
+import com.niklauncher.core.install.InstallPlanner
+import com.niklauncher.core.install.MetadataClient
+import com.niklauncher.core.install.VersionCatalog
 import com.niklauncher.core.io.GamePaths
 import com.niklauncher.core.runtime.NativeRuntimeProvider
 import com.niklauncher.core.runtime.UnavailableRuntimeProvider
@@ -33,6 +37,15 @@ class AppContainer(context: Context) {
 
     val downloader: Downloader = Downloader(transport)
 
-    /** Replaced by the real pack installer in Phase 2. */
+    val metadata: MetadataClient = MetadataClient(transport)
+
+    val catalog: VersionCatalog = VersionCatalog(metadata, paths)
+
+    val installer: GameInstaller = GameInstaller(catalog, downloader, paths, InstallPlanner(paths))
+
+    /**
+     * Still a stand-in: the runtime packs themselves are not published yet, so
+     * this reports nothing installed rather than pretending otherwise.
+     */
     val runtimeProvider: NativeRuntimeProvider = UnavailableRuntimeProvider()
 }
