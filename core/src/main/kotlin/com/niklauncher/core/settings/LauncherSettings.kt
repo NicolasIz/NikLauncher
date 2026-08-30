@@ -19,6 +19,13 @@ data class LauncherSettings(
     val lastPlayedInstanceId: String? = null,
     /** Which control layout the game opens with. */
     val activeControlLayoutId: String = "default",
+    /**
+     * Where the runtime pack index is published.
+     *
+     * Deliberately empty by default: which packs NikLauncher offers is a
+     * licensing decision, not something to hard-code.
+     */
+    val runtimePackIndexUrl: String = "",
 ) {
     val defaultPerformanceProfile: PerformanceProfile
         get() = PerformanceProfile.fromId(defaultPerformanceProfileId) ?: PerformanceProfile.BALANCED

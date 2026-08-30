@@ -15,3 +15,11 @@ target_link_options(nikprobe PRIVATE "-Wl,-z,max-page-size=16384")
 
 find_library(log-lib log)
 target_link_libraries(nikprobe ${log-lib})
+
+# The JVM bridge. It dlopen()s the runtime pack's libjvm.so and starts the VM
+# through the JNI Invocation API, which is the only way to run a downloaded
+# Java runtime on Android: exec()ing a binary from the app data directory is
+# forbidden.
+add_library(nikjvm SHARED nikjvm.c)
+target_link_options(nikjvm PRIVATE "-Wl,-z,max-page-size=16384")
+target_link_libraries(nikjvm ${log-lib})

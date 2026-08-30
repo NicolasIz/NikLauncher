@@ -22,6 +22,12 @@ data class DeviceCapabilities(
     val supportsVulkan: Boolean,
     val vulkanVersion: Int,
     val supports64Bit: Boolean,
+    /**
+     * Kernel page size. A runtime pack whose shared objects are aligned for
+     * smaller pages will not map, so this decides which packs are offered.
+     */
+    val pageSizeBytes: Int,
+    val supportedAbis: List<String>,
 ) {
     /**
      * A heap that leaves room for the launcher, the graphics translation layer
@@ -57,9 +63,21 @@ data class DeviceCapabilities(
                 supportsVulkan = vulkanVersion > 0,
                 vulkanVersion = vulkanVersion,
                 supports64Bit = Build.SUPPORTED_64_BIT_ABIS.isNotEmpty(),
+                pageSizeBytes = readPageSize(),
+                supportedAbis = Build.SUPPORTED_ABIS.toList(),
             )
         }
 
+        /**
+         * Reads the kernel page size, falling back to 4 KB - the value every
+         * Android device used before 16 KB pages appeared - if the query
+         * fails, since guessing larger would rule out usable packs.
+         */
+        private fun readPageSize(): Int = runCatching {
+            android.system.Os.sysconf(android.system.OsConstants._SC_PAGESIZE).toInt()
+        }.getOrDefault(DEFAULT_PAGE_SIZE).takeIf { it > 0 } ?: DEFAULT_PAGE_SIZE
+
+        private const val DEFAULT_PAGE_SIZE = 4096
         private const val BYTES_PER_MB = 1024L * 1024L
     }
 }

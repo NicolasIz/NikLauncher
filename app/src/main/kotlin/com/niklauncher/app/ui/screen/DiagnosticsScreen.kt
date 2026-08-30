@@ -27,6 +27,7 @@ import com.niklauncher.app.ui.LauncherViewModel
 import com.niklauncher.app.ui.component.SectionHeader
 import com.niklauncher.app.ui.component.StatusCard
 import com.niklauncher.app.ui.component.StatusTone
+import androidx.compose.material.icons.filled.Inventory2
 
 /**
  * Runs the native probe and reports what it found.
@@ -66,6 +67,36 @@ fun DiagnosticsScreen(viewModel: LauncherViewModel) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             else -> ProbeResults(current)
+        }
+
+        SectionHeader(
+            title = "Runtime de Java",
+            subtitle = "De dónde salen la JVM y la capa gráfica.",
+        )
+
+        val runtime by viewModel.runtimeState.collectAsState()
+        when {
+            runtime.ready -> StatusCard(
+                icon = Icons.Filled.CheckCircle,
+                title = "Runtime instalado",
+                body = runtime.installed.joinToString { it.displayName },
+                tone = StatusTone.POSITIVE,
+            )
+
+            !runtime.hasPackSource -> StatusCard(
+                icon = Icons.Filled.Inventory2,
+                title = "Sin origen de runtime configurado",
+                body = "El instalador de packs está listo y probado, pero todavía no hay un origen " +
+                    "publicado del que descargarlos. Es una decisión de licencia pendiente, no un fallo.",
+                tone = StatusTone.WARNING,
+            )
+
+            else -> StatusCard(
+                icon = Icons.Filled.Inventory2,
+                title = "Ningún runtime instalado",
+                body = "Hay un origen configurado pero aún no se ha instalado ningún pack.",
+                tone = StatusTone.NEUTRAL,
+            )
         }
     }
 }

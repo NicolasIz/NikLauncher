@@ -29,6 +29,7 @@ class SettingsRepository(private val context: Context) {
             preferences[Keys.VERBOSE_LOGGING] = updated.verboseLogging
             preferences[Keys.DOWNLOAD_CONCURRENCY] = updated.downloadConcurrency
             preferences[Keys.CONTROL_LAYOUT] = updated.activeControlLayoutId
+            preferences[Keys.PACK_INDEX_URL] = updated.runtimePackIndexUrl
             updated.lastPlayedInstanceId
                 ?.let { preferences[Keys.LAST_INSTANCE] = it }
                 ?: preferences.remove(Keys.LAST_INSTANCE)
@@ -46,6 +47,7 @@ class SettingsRepository(private val context: Context) {
             downloadConcurrency = this[Keys.DOWNLOAD_CONCURRENCY] ?: defaults.downloadConcurrency,
             lastPlayedInstanceId = this[Keys.LAST_INSTANCE],
             activeControlLayoutId = this[Keys.CONTROL_LAYOUT] ?: defaults.activeControlLayoutId,
+            runtimePackIndexUrl = this[Keys.PACK_INDEX_URL] ?: defaults.runtimePackIndexUrl,
         )
     }
 
@@ -58,5 +60,6 @@ class SettingsRepository(private val context: Context) {
         val DOWNLOAD_CONCURRENCY = intPreferencesKey("download_concurrency")
         val LAST_INSTANCE = stringPreferencesKey("last_played_instance")
         val CONTROL_LAYOUT = stringPreferencesKey("active_control_layout")
+        val PACK_INDEX_URL = stringPreferencesKey("runtime_pack_index_url")
     }
 }

@@ -32,6 +32,8 @@ data class RuntimeState(
     val installed: List<JavaRuntime> = emptyList(),
     val backends: List<GraphicsBackend> = emptyList(),
     val checked: Boolean = false,
+    /** False when no runtime pack source has been configured yet. */
+    val hasPackSource: Boolean = false,
 ) {
     val ready: Boolean get() = installed.isNotEmpty()
 }
@@ -222,6 +224,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
                 installed = provider.installedRuntimes().map { it.runtime },
                 backends = provider.availableBackends(),
                 checked = true,
+                hasPackSource = runCatching { container.packCatalog.hasSource() }.getOrDefault(false),
             )
         }
     }

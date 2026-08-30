@@ -1,6 +1,7 @@
 package com.niklauncher.app.data
 
 import android.content.Context
+import kotlinx.coroutines.flow.first
 import com.niklauncher.core.download.Downloader
 import com.niklauncher.core.install.GameInstaller
 import com.niklauncher.core.install.InstallPlanner
@@ -8,7 +9,8 @@ import com.niklauncher.core.install.MetadataClient
 import com.niklauncher.core.install.VersionCatalog
 import com.niklauncher.core.io.GamePaths
 import com.niklauncher.core.runtime.NativeRuntimeProvider
-import com.niklauncher.core.runtime.UnavailableRuntimeProvider
+import com.niklauncher.core.runtime.RuntimePackCatalog
+import com.niklauncher.core.runtime.RuntimePackInstaller
 
 /**
  * Manual dependency wiring.
@@ -45,9 +47,21 @@ class AppContainer(context: Context) {
 
     val installer: GameInstaller = GameInstaller(catalog, downloader, paths, InstallPlanner(paths))
 
+    val packCatalog: RuntimePackCatalog = RuntimePackCatalog(
+        metadata = metadata,
+        paths = paths,
+        indexUrlProvider = { settings.settings.first().runtimePackIndexUrl },
+    )
+
     /**
-     * Still a stand-in: the runtime packs themselves are not published yet, so
-     * this reports nothing installed rather than pretending otherwise.
+     * The real provider. With no pack source configured the catalogue is empty,
+     * so this reports nothing installed - which is the truth, rather than a
+     * stub pretending to be one.
      */
-    val runtimeProvider: NativeRuntimeProvider = UnavailableRuntimeProvider()
+    val runtimeProvider: NativeRuntimeProvider = RuntimePackInstaller(
+        paths = paths,
+        downloader = downloader,
+        indexProvider = { packCatalog.index() },
+        devicePageSizeBytes = device.pageSizeBytes,
+    )
 }
