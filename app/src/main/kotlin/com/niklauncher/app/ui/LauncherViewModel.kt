@@ -10,6 +10,9 @@ import com.niklauncher.app.data.ProbeReport
 import com.niklauncher.core.install.InstallResult
 import com.niklauncher.core.install.InstallStage
 import com.niklauncher.core.install.InstallProgress
+import com.niklauncher.core.control.ControlButton
+import com.niklauncher.core.control.ControlLayout
+import com.niklauncher.core.control.ControlPresets
 import com.niklauncher.core.instance.Instance
 import com.niklauncher.core.instance.ModLoader
 import com.niklauncher.core.runtime.GraphicsBackend
@@ -58,6 +61,7 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
 
     init {
         viewModelScope.launch { container.instances.load() }
+        viewModelScope.launch { container.controlLayouts.load() }
         refreshRuntimeState()
         loadCatalog()
     }
@@ -131,6 +135,84 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
 
     fun runNativeProbe(context: android.content.Context) {
         viewModelScope.launch { _probeReport.value = NativeProbe.run(context) }
+    }
+
+    // --- Control layouts -------------------------------------------------
+
+    val controlLayouts: StateFlow<List<ControlLayout>> = container.controlLayouts.layouts
+
+    private val _editingLayout = MutableStateFlow<ControlLayout?>(null)
+    val editingLayout: StateFlow<ControlLayout?> = _editingLayout.asStateFlow()
+
+    private val _selectedElementId = MutableStateFlow<String?>(null)
+    val selectedElementId: StateFlow<String?> = _selectedElementId.asStateFlow()
+
+    fun beginEditing(layoutId: String) {
+        _editingLayout.value = controlLayouts.value.firstOrNull { it.id == layoutId }
+            ?: ControlPresets.default()
+        _selectedElementId.value = null
+    }
+
+    fun selectElement(elementId: String?) {
+        _selectedElementId.value = elementId
+    }
+
+    /**
+     * Nudges an element by a fraction of the viewport. Editing works in the
+     * same normalised space the layout is stored in, so a control never lands
+     * somewhere that only makes sense at one screen size.
+     */
+    fun moveElement(elementId: String, deltaX: Float, deltaY: Float) {
+        val layout = _editingLayout.value ?: return
+        _editingLayout.value = layout.copy(
+            buttons = layout.buttons.map {
+                if (it.id == elementId) it.copy(x = it.x + deltaX, y = it.y + deltaY).normalised() else it
+            },
+            joysticks = layout.joysticks.map {
+                if (it.id == elementId) it.copy(x = it.x + deltaX, y = it.y + deltaY).normalised() else it
+            },
+        )
+    }
+
+    fun updateSelectedButton(transform: (ControlButton) -> ControlButton) {
+        val layout = _editingLayout.value ?: return
+        val id = _selectedElementId.value ?: return
+        _editingLayout.value = layout.copy(
+            buttons = layout.buttons.map { if (it.id == id) transform(it).normalised() else it },
+        )
+    }
+
+    fun deleteSelectedElement() {
+        val layout = _editingLayout.value ?: return
+        val id = _selectedElementId.value ?: return
+        _editingLayout.value = layout.withoutElement(id)
+        _selectedElementId.value = null
+    }
+
+    fun saveEditedLayout() {
+        val layout = _editingLayout.value ?: return
+        viewModelScope.launch {
+            container.controlLayouts.upsert(layout)
+            _editingLayout.value = null
+            _selectedElementId.value = null
+        }
+    }
+
+    fun discardEdits() {
+        _editingLayout.value = null
+        _selectedElementId.value = null
+    }
+
+    fun resetControlLayouts() {
+        viewModelScope.launch {
+            container.controlLayouts.resetToDefaults()
+            _editingLayout.value = null
+            _selectedElementId.value = null
+        }
+    }
+
+    fun setActiveLayout(layoutId: String) {
+        updateSettings { it.copy(activeControlLayoutId = layoutId) }
     }
 
     fun refreshRuntimeState() {

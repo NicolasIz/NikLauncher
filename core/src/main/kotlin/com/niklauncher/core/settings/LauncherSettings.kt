@@ -17,6 +17,8 @@ data class LauncherSettings(
     /** Cap on parallel downloads; higher values heat the device for little gain. */
     val downloadConcurrency: Int = 6,
     val lastPlayedInstanceId: String? = null,
+    /** Which control layout the game opens with. */
+    val activeControlLayoutId: String = "default",
 ) {
     val defaultPerformanceProfile: PerformanceProfile
         get() = PerformanceProfile.fromId(defaultPerformanceProfileId) ?: PerformanceProfile.BALANCED

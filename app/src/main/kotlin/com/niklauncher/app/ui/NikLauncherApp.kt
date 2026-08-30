@@ -2,6 +2,7 @@ package com.niklauncher.app.ui
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Gamepad
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Widgets
@@ -23,6 +24,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.niklauncher.app.R
+import com.niklauncher.app.ui.screen.ControlsScreen
 import com.niklauncher.app.ui.screen.DiagnosticsScreen
 import com.niklauncher.app.ui.screen.InstancesScreen
 import com.niklauncher.app.ui.screen.SettingsScreen
@@ -35,6 +37,7 @@ private enum class Destination(
 ) {
     INSTANCES("instances", R.string.nav_instances, Icons.Filled.Widgets),
     VERSIONS("versions", R.string.nav_versions, Icons.Filled.ViewList),
+    CONTROLS("controls", R.string.nav_controls, Icons.Filled.Gamepad),
     DIAGNOSTICS("diagnostics", R.string.nav_diagnostics, Icons.Filled.Science),
     SETTINGS("settings", R.string.nav_settings, Icons.Filled.Settings),
 }
@@ -75,6 +78,7 @@ fun NikLauncherApp(viewModel: LauncherViewModel) {
         ) {
             composable(Destination.INSTANCES.route) { InstancesScreen(viewModel) }
             composable(Destination.VERSIONS.route) { VersionsScreen(viewModel) }
+            composable(Destination.CONTROLS.route) { ControlsScreen(viewModel) }
             composable(Destination.DIAGNOSTICS.route) { DiagnosticsScreen(viewModel) }
             composable(Destination.SETTINGS.route) { SettingsScreen(viewModel) }
         }

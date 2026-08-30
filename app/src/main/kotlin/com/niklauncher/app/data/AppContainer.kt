@@ -33,6 +33,8 @@ class AppContainer(context: Context) {
 
     val instances: InstanceRepository = InstanceRepository(paths)
 
+    val controlLayouts: ControlLayoutRepository = ControlLayoutRepository(paths)
+
     val transport: OkHttpTransport = OkHttpTransport()
 
     val downloader: Downloader = Downloader(transport)

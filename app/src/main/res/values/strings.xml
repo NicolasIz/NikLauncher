@@ -4,6 +4,7 @@
 
     <string name="nav_instances">Instancias</string>
     <string name="nav_versions">Versiones</string>
+    <string name="nav_controls">Controles</string>
     <string name="nav_diagnostics">Diagnóstico</string>
     <string name="nav_settings">Ajustes</string>
 
