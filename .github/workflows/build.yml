@@ -10,6 +10,9 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Test :core and assemble the APK
@@ -45,6 +48,47 @@ jobs:
           name: NikLauncher-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      # Actions artifacts are zipped and need a signed-in GitHub session, which
+      # makes them awkward to install on the phone the APK is built for. A
+      # rolling pre-release exposes the .apk as a direct, installable download.
+      - name: Publish the APK as a rolling pre-release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          apk=$(find app/build/outputs/apk/debug -name '*.apk' | head -n 1)
+          if [ -z "$apk" ]; then
+            echo "No APK produced" >&2
+            exit 1
+          fi
+
+          version=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n 1)
+          version=${version:-0.0.0}
+          asset="NikLauncher-${version}-debug.apk"
+          cp "$apk" "$asset"
+
+          cat > release-notes.md <<NOTES
+          Build de desarrollo de NikLauncher, desde el commit \`${GITHUB_SHA:0:7}\`.
+
+          **Descarga \`${asset}\` directamente e instálalo.** Android pedirá permiso
+          para instalar desde un origen desconocido la primera vez.
+
+          Firmada con la clave de depuración. Se instala como \`com.niklauncher.debug\`,
+          así que no entra en conflicto con una futura build de release.
+          NOTES
+
+          # Recreated each build so the tag always points at the current commit.
+          gh release delete dev-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create dev-latest "$asset" \
+            --title "NikLauncher $version (desarrollo)" \
+            --notes-file release-notes.md \
+            --prerelease \
+            --target "$GITHUB_SHA"
+
+          echo "Published: $(gh release view dev-latest --json url --jq .url)"
 
       - name: Upload test reports
         if: always()
