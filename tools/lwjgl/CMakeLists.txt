@@ -100,13 +100,16 @@ set(STB ${LWJGL_DIR}/modules/lwjgl/stb/src)
 
 file(GLOB STB_GENERATED ${STB}/generated/c/*.c)
 
-add_library(lwjgl_stb SHARED
-    ${STB_GENERATED}
-    ${STB}/main/c/stb_vorbis.c
-)
+# stb_vorbis.c is not listed as a source on purpose: the generated STBVorbis
+# binding #includes it, the way stb's other single-header libraries are pulled
+# in. Compiling it a second time gives every vorbis symbol two definitions.
+add_library(lwjgl_stb SHARED ${STB_GENERATED})
 
+# common_tools.h reaches for LinuxConfig.h under LWJGL_LINUX, so the platform
+# directory has to be on the path here too, not only in the core target.
 target_include_directories(lwjgl_stb PRIVATE
     ${CORE}/main/c
+    ${CORE}/main/c/linux
     ${STB}/main/c
 )
 
