@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NikLauncher</string>
+
+    <string name="nav_instances">Instancias</string>
+    <string name="nav_versions">Versiones</string>
+    <string name="nav_settings">Ajustes</string>
+
+    <string name="home_title">Tus instancias</string>
+    <string name="home_empty_title">Todavía no hay instancias</string>
+    <string name="home_empty_body">Crea una instancia para elegir versión, memoria y perfil de rendimiento.</string>
+    <string name="home_create">Nueva instancia</string>
+    <string name="home_play">Jugar</string>
+
+    <string name="runtime_status_title">Estado del runtime</string>
+    <string name="runtime_missing">Runtime de Java no instalado</string>
+    <string name="runtime_missing_body">NikLauncher necesita un runtime de Java para arm64 antes de poder ejecutar Minecraft. Se instalará en la Fase 2.</string>
+
+    <string name="settings_title">Ajustes</string>
+    <string name="settings_memory">Memoria asignada</string>
+    <string name="settings_performance">Perfil de rendimiento</string>
+    <string name="settings_keep_screen_on">Mantener la pantalla encendida</string>
+    <string name="settings_show_snapshots">Mostrar snapshots y versiones antiguas</string>
+    <string name="settings_verbose_logging">Registro detallado</string>
+    <string name="settings_downloads">Descargas simultáneas</string>
+
+    <string name="versions_title">Versiones</string>
+    <string name="versions_offline_title">Catálogo no disponible</string>
+    <string name="versions_offline_body">La descarga del catálogo de versiones de Mojang llega en la Fase 2.</string>
+</resources>

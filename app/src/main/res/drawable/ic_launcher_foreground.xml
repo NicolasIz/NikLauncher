@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The NikLauncher mark: an angular "N" whose diagonal is picked out in amber
+  against violet uprights. Kept inside the adaptive-icon safe zone.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="#7C5CFF"
+        android:pathData="M37,34 h9 v40 h-9 z" />
+    <path
+        android:fillColor="#7C5CFF"
+        android:pathData="M62,34 h9 v40 h-9 z" />
+    <path
+        android:fillColor="#FFB020"
+        android:pathData="M37,34 h9 l25,40 h-9 z" />
+</vector>
