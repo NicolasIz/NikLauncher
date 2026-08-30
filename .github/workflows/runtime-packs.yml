@@ -25,6 +25,9 @@ env:
   # toolchain file fail on its use of IN_LIST. This commit declares the
   # 2.8.12...3.10 range, which turns the policy on.
   GL4ES_REF: 81547d986798e876de8b434193920b606a72363f
+  LWJGL_REF: "3.3.6"
+  LIBFFI_VERSION: "3.4.6"
+  NDK_VERSION: "27.0.12077973"
   ANDROID_API: "31"
   ANDROID_ABI: arm64-v8a
 
@@ -43,8 +46,8 @@ jobs:
       - name: Install the NDK
         run: |
           set -euo pipefail
-          sdkmanager --install "ndk;27.0.12077973" >/dev/null
-          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
+          sdkmanager --install "ndk;${NDK_VERSION}" >/dev/null
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
 
       - name: Fetch gl4es
         run: |
@@ -147,4 +150,123 @@ jobs:
         with:
           name: gl4es-${{ env.ANDROID_ABI }}
           path: out/gl4es-*.tar.gz*
+          if-no-files-found: error
+
+  lwjgl:
+    name: Build LWJGL natives (core and stb)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out NikLauncher
+        uses: actions/checkout@v4
+
+      - name: Set up the Android SDK and NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install the NDK
+        run: |
+          set -euo pipefail
+          sdkmanager --install "ndk;${NDK_VERSION}" >/dev/null
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      # LWJGL links against libffi but bundles only its headers, so it has to
+      # be cross-compiled first. Built static: an installed runtime then has
+      # one fewer loose shared object to resolve at startup.
+      - name: Cross-compile libffi
+        run: |
+          set -euo pipefail
+          toolchain=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64
+
+          curl -fsSL -o libffi.tar.gz \
+            "https://github.com/libffi/libffi/releases/download/v${LIBFFI_VERSION}/libffi-${LIBFFI_VERSION}.tar.gz"
+          tar xf libffi.tar.gz
+          cd "libffi-${LIBFFI_VERSION}"
+
+          export CC="$toolchain/bin/aarch64-linux-android${ANDROID_API}-clang"
+          export AR="$toolchain/bin/llvm-ar"
+          export RANLIB="$toolchain/bin/llvm-ranlib"
+          export CFLAGS="-fPIC -O2"
+
+          ./configure \
+            --host=aarch64-linux-android \
+            --prefix="$GITHUB_WORKSPACE/ffi-install" \
+            --enable-static --disable-shared --disable-docs
+          make -j"$(nproc)"
+          make install
+
+          echo "libffi built:"
+          ls -la "$GITHUB_WORKSPACE/ffi-install/lib"
+
+      - name: Fetch LWJGL
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch "$LWJGL_REF" https://github.com/LWJGL/lwjgl3.git upstream-lwjgl
+          echo "Building LWJGL $LWJGL_REF at $(git -C upstream-lwjgl rev-parse --short HEAD)"
+
+      - name: Configure
+        run: |
+          set -euo pipefail
+          cmake -S tools/lwjgl -B build-lwjgl \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI="$ANDROID_ABI" \
+            -DANDROID_PLATFORM="android-$ANDROID_API" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLWJGL_DIR="$GITHUB_WORKSPACE/upstream-lwjgl" \
+            -DFFI_ROOT="$GITHUB_WORKSPACE/ffi-install"
+
+      - name: Build
+        run: cmake --build build-lwjgl --parallel "$(nproc)"
+
+      - name: Collect and verify
+        run: |
+          set -euo pipefail
+          mkdir -p out/lwjgl
+          find build-lwjgl -name 'liblwjgl*.so' -exec cp -v {} out/lwjgl/ \;
+
+          if [ ! -f out/lwjgl/liblwjgl.so ]; then
+            echo "the LWJGL core library was not produced" >&2
+            exit 1
+          fi
+
+          readelf=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf
+          for lib in out/lwjgl/*.so; do
+            echo "--- $lib"
+            "$readelf" -h "$lib" | grep -E "Machine|Class"
+            for align in $("$readelf" -l "$lib" | awk '/LOAD/ {print $NF}'); do
+              if [ "$((align))" -lt 16384 ]; then
+                echo "PT_LOAD alignment $align is below 16 KB in $lib" >&2
+                exit 1
+              fi
+            done
+            echo "alignment ok"
+          done
+
+      - name: Describe the component
+        run: |
+          set -euo pipefail
+          cat > out/lwjgl/component.json <<JSON
+          {
+            "id": "lwjgl",
+            "upstream": "https://github.com/LWJGL/lwjgl3",
+            "upstreamRef": "${LWJGL_REF}",
+            "license": "BSD-3-Clause",
+            "bundles": ["libffi ${LIBFFI_VERSION} (MIT, linked statically)"],
+            "abi": "${ANDROID_ABI}",
+            "minSdk": ${ANDROID_API},
+            "maxPageSizeBytes": 16384
+          }
+          JSON
+          cat out/lwjgl/component.json
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          (cd out && tar -czf lwjgl-${ANDROID_ABI}.tar.gz lwjgl)
+          sha1sum out/lwjgl-${ANDROID_ABI}.tar.gz | tee out/lwjgl-${ANDROID_ABI}.tar.gz.sha1
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: lwjgl-${{ env.ANDROID_ABI }}
+          path: out/lwjgl-*.tar.gz*
           if-no-files-found: error
