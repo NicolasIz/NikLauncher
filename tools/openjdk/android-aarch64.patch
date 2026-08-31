@@ -92,7 +92,7 @@ index 51d4f724c..2bf18c53d 100644
    else
      NEEDS_LIB_CUPS=true
 diff --git a/make/autoconf/platform.m4 b/make/autoconf/platform.m4
-index 14de712b5..9069f7beb 100644
+index 14de712b5..fd984fb49 100644
 --- a/make/autoconf/platform.m4
 +++ b/make/autoconf/platform.m4
 @@ -198,6 +198,10 @@ AC_DEFUN([PLATFORM_EXTRACT_VARS_FROM_CPU],
@@ -116,6 +116,37 @@ index 14de712b5..9069f7beb 100644
    AC_SUBST(HOTSPOT_$1_OS)
  
    HOTSPOT_$1_OS_TYPE=${OPENJDK_$1_OS_TYPE}
+@@ -603,13 +610,16 @@ AC_DEFUN([PLATFORM_SETUP_LEGACY_VARS_HELPER],
+     OPENJDK_$1_OS_INCLUDE_SUBDIR="win32"
+   elif test "x$OPENJDK_TARGET_OS" = "xmacosx"; then
+     OPENJDK_$1_OS_INCLUDE_SUBDIR="darwin"
++  elif test "x$OPENJDK_TARGET_OS" = "xandroid"; then
++    OPENJDK_$1_OS_INCLUDE_SUBDIR="linux"
+   fi
+   AC_SUBST(OPENJDK_$1_OS_INCLUDE_SUBDIR)
+ ])
+ 
+ AC_DEFUN([PLATFORM_SET_RELEASE_FILE_OS_VALUES],
+ [
+-  if test "x$OPENJDK_TARGET_OS" = "xlinux"; then
++  if test "x$OPENJDK_TARGET_OS" = "xlinux" || \
++      test "x$OPENJDK_TARGET_OS" = "xandroid"; then
+     RELEASE_FILE_OS_NAME=Linux
+   fi
+   if test "x$OPENJDK_TARGET_OS" = "xwindows"; then
+@@ -633,6 +643,12 @@ AC_DEFUN([PLATFORM_SET_MODULE_TARGET_OS_VALUES],
+ [
+   if test "x$OPENJDK_TARGET_OS" = xmacosx; then
+     OPENJDK_MODULE_TARGET_OS_NAME="macos"
++  elif test "x$OPENJDK_TARGET_OS" = xandroid; then
++    # This lands in java.base's ModuleTarget attribute, which jlink parses
++    # against jdk.internal.util.OperatingSystem - a closed enum with no ANDROID
++    # constant. It is a linux-kernel JDK built from the linux sources; android
++    # is a libc and userspace difference the attribute cannot express.
++    OPENJDK_MODULE_TARGET_OS_NAME="linux"
+   else
+     OPENJDK_MODULE_TARGET_OS_NAME="$OPENJDK_TARGET_OS"
+   fi
 diff --git a/make/autoconf/spec.gmk.in b/make/autoconf/spec.gmk.in
 index 7f085676c..209aaac87 100644
 --- a/make/autoconf/spec.gmk.in

@@ -32,7 +32,7 @@ stability first, so the support is ported back to 21u instead.
 
 | Area | Change |
 | ---- | ------ |
-| `platform.m4` | Recognise the OS, and map it to `HOTSPOT_OS=linux` |
+| `platform.m4` | Recognise the OS; map it to `HOTSPOT_OS=linux`, and to `linux` wherever the name becomes data |
 | `flags-cflags.m4` | Target triple and OS defines; debug symbols as for gcc |
 | `flags-other.m4` | Same target triple for the assembler |
 | `toolchain.m4` | Skip the build-compiler version probe the NDK clang fails |
@@ -373,6 +373,39 @@ all five names: linux, windows and aix map to themselves, macosx still maps to
 macos, and android maps to linux. `PlatformProps.java.template` is the only
 template in the tree that substitutes an OS name at all, and this is the only
 site that canonicalises one, so one line covers it.
+
+### And again, in the ModuleTarget attribute
+
+Fixing `PlatformProps` got the interim `java` running. jlink then failed on
+the same enum from a different direction:
+
+```
+jdk.tools.jlink.plugin.PluginException: ModuleTarget is malformed:
+    No enum constant jdk.internal.util.OperatingSystem.ANDROID
+  at jdk.tools.jlink.builder.DefaultImageBuilder.storeFiles
+```
+
+`java.base`'s `module-info.class` carries a ModuleTarget attribute naming the
+platform it was built for, written from `--target-platform` in
+`CreateJmods.gmk` and ultimately from `OPENJDK_MODULE_TARGET_PLATFORM` in
+`platform.m4`. `DefaultImageBuilder` parses it back through the same enum.
+
+That function has the same shape as the `GensrcMisc.gmk` one - a macosx
+special case, else the raw name - and needed the same android case.
+
+Sweeping for the rest of that class turned up two more, one of them silent:
+
+| Value | Was | Now |
+| ----- | --- | --- |
+| `OPENJDK_MODULE_TARGET_PLATFORM` | `android-aarch64`, rejected by jlink | `linux-aarch64` |
+| `RELEASE_FILE_OS_NAME` | **empty** - android matched none of the four branches, so the shipped `release` file said `OS_NAME=""` | `Linux` |
+| `OPENJDK_TARGET_OS_INCLUDE_SUBDIR` | `android`, so `jni_md.h` shipped in `include/android/` | `include/linux/` |
+
+The release-file one would never have failed the build. It would have shipped.
+
+Checked by lifting the three generated blocks out of `configure` itself and
+running them for all five OS names: linux, windows and aix are untouched,
+macosx still gives macos/Darwin/darwin, android now gives linux/Linux/linux.
 
 ## Three files the Mobile Project never needed
 
