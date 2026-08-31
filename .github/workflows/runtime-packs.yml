@@ -329,12 +329,20 @@ jobs:
           sdkmanager --install "ndk;${NDK_VERSION}" >/dev/null
           echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
 
-      - name: Install meson and ninja
+      # Mesa generates a lot of its source at build time, so the host needs the
+      # generators themselves: mako for the Python templates, bison and flex
+      # for the GLSL parser, glslang for the SPIR-V it feeds to Zink. These are
+      # host tools - none of them ends up inside the pack.
+      - name: Install Mesa's build prerequisites
         run: |
           set -euo pipefail
-          python3 -m pip install --quiet --upgrade meson ninja
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bison flex glslang-tools cmake pkg-config
+          python3 -m pip install --quiet --upgrade meson ninja mako pyyaml
           meson --version
           ninja --version
+          python3 -c "import mako; print('mako', mako.__version__)"
+          glslangValidator --version | head -2
 
       # Printed so the pinned MESA_REF can be corrected from real data rather
       # than from memory.
