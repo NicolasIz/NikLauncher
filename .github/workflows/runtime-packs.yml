@@ -40,6 +40,7 @@ env:
   # options below were not verified locally the way gl4es and LWJGL were, and
   # the probe job exists to read them from the source itself.
   MESA_REF: "mesa-25.1.5"
+  LIBDRM_REF: "libdrm-2.4.124"
 
 jobs:
   gl4es:
@@ -382,17 +383,31 @@ jobs:
 
       # A cross file is how meson is pointed at the NDK. Written out rather
       # than committed while the option set is still being established.
+      #
+      # pkg-config is a real binary here, not 'false' as it was on the first
+      # attempt. Setting it to 'false' made every lookup fail as "pkg-config
+      # not found" rather than "dependency not found", which hides which
+      # dependencies are actually missing. pkg_config_libdir instead points at
+      # the cross-built dependencies only, so nothing from the host can leak
+      # into an Android build.
       - name: Write the NDK cross file
         run: |
           set -euo pipefail
           tc=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin
+          deps=$GITHUB_WORKSPACE/android-deps
+          # Created up front: meson reads pkg_config_libdir before anything has
+          # been installed into it.
+          mkdir -p "$deps/lib/pkgconfig"
           cat > cross-android-arm64.ini <<INI
           [binaries]
           c = '$tc/aarch64-linux-android${ANDROID_API}-clang'
           cpp = '$tc/aarch64-linux-android${ANDROID_API}-clang++'
           ar = '$tc/llvm-ar'
           strip = '$tc/llvm-strip'
-          pkg-config = 'false'
+          pkg-config = 'pkg-config'
+
+          [properties]
+          pkg_config_libdir = '$deps/lib/pkgconfig'
 
           [host_machine]
           system = 'android'
@@ -401,6 +416,42 @@ jobs:
           endian = 'little'
           INI
           cat cross-android-arm64.ini
+
+      # Mesa asks for libdrm even with only Zink enabled, so it has to be
+      # cross-compiled first - the same pattern the LWJGL job uses for libffi.
+      # Only the core library is wanted: every hardware-specific backend is off,
+      # since the GPU driver on the device is the vendor's, not Mesa's.
+      - name: Cross-compile libdrm
+        run: |
+          set -euo pipefail
+          git ls-remote --tags https://gitlab.freedesktop.org/mesa/drm.git \
+            | grep -oE 'libdrm-[0-9.]+$' | sort -V | tail -5
+          git clone --depth 1 --branch "$LIBDRM_REF" \
+            https://gitlab.freedesktop.org/mesa/drm.git upstream-drm
+          meson setup upstream-drm/build-android upstream-drm \
+            --cross-file "$GITHUB_WORKSPACE/cross-android-arm64.ini" \
+            --prefix "$GITHUB_WORKSPACE/android-deps" \
+            --buildtype release \
+            -Dintel=disabled -Dradeon=disabled -Damdgpu=disabled \
+            -Dnouveau=disabled -Dvmwgfx=disabled -Dfreedreno=disabled \
+            -Dvc4=disabled -Detnaviv=disabled \
+            -Dcairo-tests=disabled -Dman-pages=disabled \
+            -Dvalgrind=disabled -Dtests=false
+          meson compile -C upstream-drm/build-android
+          meson install -C upstream-drm/build-android
+          echo "installed:"
+          find "$GITHUB_WORKSPACE/android-deps" -name 'libdrm*' -o -name '*.pc' | head -20
+
+      # Diagnostic: shows why libdrm is being asked for, so the next decision is
+      # made from Mesa's own build logic rather than from guesswork.
+      - name: Show how Mesa asks for libdrm
+        run: |
+          set -euo pipefail
+          cd upstream-mesa
+          echo "===== meson.build around the libdrm dependency ====="
+          sed -n '1670,1710p' meson.build
+          echo "===== every libdrm mention ====="
+          grep -n 'libdrm' meson.build | head -40
 
       # Configure only. Every option name and dependency is validated here, so
       # a mistake surfaces in seconds instead of after a long compile.
