@@ -12,8 +12,13 @@ on:
         description: "Publish the built components as a pre-release"
         type: boolean
         default: false
-      probe_openjdk:
-        description: "Configure OpenJDK for Android without building"
+      # Off by default because it is the one job here that costs the better
+      # part of an hour; the other three finish in five minutes. The name said
+      # "without building" long after the job stopped being a probe and started
+      # building the image, which is a good way to read a green run as proof of
+      # something that never ran.
+      openjdk:
+        description: "Build OpenJDK 21 for Android (slow, ~1h)"
         type: boolean
         default: false
 
@@ -540,7 +545,7 @@ jobs:
   # an hour. Same discipline that got Mesa right in three cheap rounds.
   openjdk:
     name: Build OpenJDK 21 for Android
-    if: ${{ inputs.probe_openjdk }}
+    if: ${{ inputs.openjdk }}
     runs-on: ubuntu-latest
 
     steps:
