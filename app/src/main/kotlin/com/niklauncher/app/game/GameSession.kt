@@ -32,7 +32,12 @@ sealed interface GameState {
     data object Preparing : GameState
     data class Ready(val summary: String) : GameState
     data object Running : GameState
-    data class Failed(val reason: String) : GameState
+    /**
+     * [logTail] is shown on screen rather than only written to a file: internal
+     * storage is not browsable without a PC, so a path the player cannot open
+     * is not a diagnosis they can send back.
+     */
+    data class Failed(val reason: String, val logTail: String? = null) : GameState
 }
 
 /**
@@ -172,14 +177,19 @@ class GameSession(
         _state.value = GameState.Running
         Log.i(TAG, "Starting ${plan.backend.displayName} session for $instanceId")
 
+        val log = File(container.paths.logs, "session-$instanceId.log")
         val result = JvmBridge.launch(
             runtime = installed,
             command = plan.command,
             environment = environment(installed, plan),
+            logFile = log,
         )
 
         if (result is JvmBridge.Result.Failed) {
-            _state.value = GameState.Failed(result.reason)
+            // The path matters as much as the reason: what HotSpot or Minecraft
+            // said is in there, and the reason alone is often just "it did not
+            // start".
+            _state.value = GameState.Failed(result.reason, tailOf(log))
         }
     }
 
@@ -235,7 +245,18 @@ class GameSession(
         append(instance.memoryMegabytes).append(" MB")
     }
 
+    /**
+     * The end of the log, which is where the reason lives: HotSpot's complaint
+     * about a VM it could not create, or the stack trace of whatever threw.
+     */
+    private fun tailOf(log: File): String? = runCatching {
+        if (!log.isFile) return@runCatching null
+        val lines = log.readLines()
+        lines.takeLast(LOG_TAIL_LINES).joinToString("\n").takeIf { it.isNotBlank() }
+    }.getOrNull()
+
     private companion object {
         const val TAG = "NikLauncher"
+        const val LOG_TAIL_LINES = 40
     }
 }

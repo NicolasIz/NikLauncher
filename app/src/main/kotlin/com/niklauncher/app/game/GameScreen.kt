@@ -2,6 +2,8 @@ package com.niklauncher.app.game
 
 import android.view.SurfaceView
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -71,7 +73,7 @@ fun GameScreen(
                 onJoystickReleased = onJoystickReleased,
             )
 
-            is GameState.Failed -> Failure(value.reason, onExit)
+            is GameState.Failed -> Failure(value.reason, value.logTail, onExit)
         }
     }
 }
@@ -90,7 +92,7 @@ private fun Message(text: String) {
 }
 
 @Composable
-private fun Failure(reason: String, onExit: () -> Unit) {
+private fun Failure(reason: String, logTail: String?, onExit: () -> Unit) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
             verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -108,6 +110,22 @@ private fun Failure(reason: String, onExit: () -> Unit) {
                 fontFamily = FontFamily.Monospace,
                 style = MaterialTheme.typography.bodyMedium,
             )
+            if (logTail != null) {
+                Text(
+                    text = "Últimas líneas del registro:",
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                Text(
+                    text = logTail,
+                    color = Color(0xFFBFC8CC),
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState()),
+                )
+            }
             Button(onClick = onExit) { Text("Volver") }
         }
     }

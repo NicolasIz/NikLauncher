@@ -23,6 +23,7 @@ object JvmBridge {
 
     private val loadError: Throwable? = runCatching { System.loadLibrary(LIBRARY_NAME) }.exceptionOrNull()
 
+    private external fun nativeRedirectOutput(path: String): String?
     private external fun nativeCreateJvm(libjvmPath: String, options: Array<String>): String?
     private external fun nativeInvokeMain(mainClass: String, args: Array<String>): String?
     private external fun nativeIsRunning(): Boolean
@@ -44,6 +45,7 @@ object JvmBridge {
         runtime: InstalledRuntime,
         command: LaunchCommand,
         environment: Map<String, String> = emptyMap(),
+        logFile: File? = null,
     ): Result = withContext(Dispatchers.IO) {
         loadError?.let {
             return@withContext Result.Failed("No se pudo cargar el puente nativo: " + it.message)
@@ -54,6 +56,15 @@ object JvmBridge {
         }
 
         environment.forEach { (key, value) -> setEnvironmentVariable(key, value) }
+
+        // Before the VM: HotSpot reports a failed creation on stderr, and
+        // redirecting afterwards would miss exactly the message that explains
+        // why there is nothing to redirect for.
+        logFile?.let { file ->
+            file.parentFile?.mkdirs()
+            nativeRedirectOutput(file.absolutePath)
+                ?.let { Log.w(TAG, "Could not capture VM output: " + it) }
+        }
 
         Log.i(TAG, "Starting " + runtime.runtime.displayName + " for " + command.mainClass)
 

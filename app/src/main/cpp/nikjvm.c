@@ -51,6 +51,47 @@ static char *dup_java_string(JNIEnv *env, jstring value) {
 }
 
 /*
+ * Sends everything the VM writes to a file.
+ *
+ * Without this the first on-device run is undiagnosable. HotSpot reports a
+ * failed VM creation on stderr, ExceptionDescribe writes a Java stack trace
+ * there, and Minecraft's own logging goes to stdout - and on Android all three
+ * go nowhere. A crash would leave the player with a closed window and us with
+ * nothing to read.
+ *
+ * Line buffered on purpose: the interesting output is usually the last thing
+ * written before something dies, and a full buffer would take it along.
+ */
+JNIEXPORT jstring JNICALL
+Java_com_niklauncher_app_runtime_JvmBridge_nativeRedirectOutput(
+        JNIEnv *env, jobject thiz, jstring path) {
+    (void) thiz;
+    char *target = dup_java_string(env, path);
+    if (target == NULL) {
+        return (*env)->NewStringUTF(env, "Could not read the log path");
+    }
+
+    char message[512];
+    if (freopen(target, "a", stdout) == NULL) {
+        snprintf(message, sizeof(message), "Could not redirect stdout to %s", target);
+        free(target);
+        return (*env)->NewStringUTF(env, message);
+    }
+    if (freopen(target, "a", stderr) == NULL) {
+        snprintf(message, sizeof(message), "Could not redirect stderr to %s", target);
+        free(target);
+        return (*env)->NewStringUTF(env, message);
+    }
+
+    setvbuf(stdout, NULL, _IOLBF, 0);
+    setvbuf(stderr, NULL, _IOLBF, 0);
+
+    LOGI("VM output going to %s", target);
+    free(target);
+    return NULL;
+}
+
+/*
  * Loads libjvm.so and starts a VM with the given options.
  *
  * Returns NULL on success, or a message describing what went wrong. Returning
