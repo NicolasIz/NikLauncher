@@ -50,7 +50,7 @@ index 6a7109342..d0859f36c 100644
      FREETYPE_TO_USE=system
    fi
 diff --git a/make/autoconf/libraries.m4 b/make/autoconf/libraries.m4
-index 51d4f724c..521610c23 100644
+index 51d4f724c..99dbf7fc9 100644
 --- a/make/autoconf/libraries.m4
 +++ b/make/autoconf/libraries.m4
 @@ -42,8 +42,9 @@ m4_include([lib-tests.m4])
@@ -65,6 +65,18 @@ index 51d4f724c..521610c23 100644
      NEEDS_LIB_X11=false
    else
      # All other instances need X11, even if building headless only, libawt still
+@@ -62,8 +63,9 @@ AC_DEFUN_ONCE([LIB_DETERMINE_DEPENDENCIES],
+   fi
+ 
+   # Check if cups is needed
+-  if test "x$OPENJDK_TARGET_OS" = xwindows; then
+-    # Windows have a separate print system
++  if test "x$OPENJDK_TARGET_OS" = xwindows ||
++      test "x$OPENJDK_TARGET_OS" = xandroid; then
++    # Windows has a separate print system, and Android has none at all
+     NEEDS_LIB_CUPS=false
+   else
+     NEEDS_LIB_CUPS=true
 diff --git a/make/autoconf/platform.m4 b/make/autoconf/platform.m4
 index 14de712b5..9069f7beb 100644
 --- a/make/autoconf/platform.m4

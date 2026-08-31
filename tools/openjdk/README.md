@@ -37,7 +37,7 @@ stability first, so the support is ported back to 21u instead.
 | `flags-other.m4` | Same target triple for the assembler |
 | `toolchain.m4` | Skip the build-compiler version probe the NDK clang fails |
 | `lib-freetype.m4` | Use the bundled freetype; there is no system one |
-| `libraries.m4` | No X11 |
+| `libraries.m4` | No X11, and no CUPS - Android has no printing system |
 | `Modules.gmk`, `JdkNativeCompilation.gmk` | Take Java and native sources from the `linux` tree |
 | `JvmFlags.gmk` | Put the linux and `linux_aarch64` include directories on the path |
 | `java.desktop/*.gmk` | No AWT, no sound |
