@@ -140,6 +140,40 @@ containing `X = X`, which javac rejects as a self-reference in an initializer.
 **This list is not known to be complete.** Each build round reveals only the
 errors the compiler reached before stopping.
 
+## Android's build variables resolve to linux
+
+Build variables throughout the JDK are written per operating system -
+`LIBS_linux`, `CFLAGS_macosx`, `LDFLAGS_aix` - and `NativeCompilation.gmk`
+picks them up by suffixing the target OS. With the target named `android`,
+every one of those is silently skipped.
+
+There are 23 such variables in the tree. The failure that exposed it was the
+`java` launcher linking with no libraries at all:
+
+```
+LIBS_linux := -ljli -lpthread $(LIBDL),      # LauncherCommon.gmk
+/usr/bin/ld: undefined reference to `JLI_Launch' ...
+```
+
+Nothing was missing from the build - `libjli.so` was produced from exactly the
+right eight sources. `-ljli` was simply never on the link line.
+
+The patch adds one mapping in `NativeCompilation.gmk` rather than an `android`
+copy of all 23, each of which would then have to be kept correct by hand:
+
+```make
+ifeq ($(OPENJDK_TARGET_OS), android)
+  OPENJDK_TARGET_OS_VARIANT := linux
+endif
+```
+
+and uses it at the eighteen lookup sites in that file. All eighteen were
+checked to be variant lookups rather than paths before substituting.
+`OPENJDK_TARGET_OS_TYPE` is left alone: it is already `unix` for android.
+
+This is the same idea as `HOTSPOT_TARGET_OS`, which `platform.m4` maps onto
+linux for exactly the same reason.
+
 ## Three files the Mobile Project never needed
 
 `JvmMapfile.gmk`, `GensrcAdlc.gmk` and `JvmOverrideFiles.gmk` are not in

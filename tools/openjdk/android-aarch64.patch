@@ -170,6 +170,128 @@ index 0eb0fb2dd..b81f69fed 100644
  SRC_SUBDIRS += share/classes
  
  SPEC_SUBDIRS += share/specs
+diff --git a/make/common/NativeCompilation.gmk b/make/common/NativeCompilation.gmk
+index 24e76ddc2..feae456c7 100644
+--- a/make/common/NativeCompilation.gmk
++++ b/make/common/NativeCompilation.gmk
+@@ -34,6 +34,23 @@ ifeq ($(_MAKEBASE_GMK), )
+   $(error You must include MakeBase.gmk prior to including NativeCompilation.gmk)
+ endif
+ 
++################################################################################
++# Build variables throughout the tree are written per operating system -
++# LIBS_linux, CFLAGS_macosx, LDFLAGS_aix and so on - and picked up below by
++# suffixing the target OS. Android compiles the linux sources, so it wants the
++# linux variants; without this every LIBS_linux is silently skipped and
++# libraries simply vanish from link lines, which is how the java launcher came
++# to be linked with no -ljli at all.
++#
++# This mirrors HOTSPOT_TARGET_OS, which platform.m4 maps onto linux for the
++# same reason. One mapping instead of an android copy of every such variable,
++# each of which would have to be kept correct by hand.
++ifeq ($(OPENJDK_TARGET_OS), android)
++  OPENJDK_TARGET_OS_VARIANT := linux
++else
++  OPENJDK_TARGET_OS_VARIANT := $(OPENJDK_TARGET_OS)
++endif
++
+ ################################################################################
+ # Create exported symbols file for static libraries
+ ################################################################################
+@@ -360,7 +377,7 @@ define SetupCompileNativeFileBody
+     ifneq ($(DISABLE_WARNING_PREFIX), )
+       $1_WARNINGS_FLAGS := $$(addprefix $(DISABLE_WARNING_PREFIX), \
+         $$($$($1_BASE)_DISABLED_WARNINGS_$(TOOLCHAIN_TYPE)_$$($1_FILENAME)) \
+-        $$($$($1_BASE)_DISABLED_WARNINGS_$(TOOLCHAIN_TYPE)_$(OPENJDK_TARGET_OS)_$$($1_FILENAME)))
++        $$($$($1_BASE)_DISABLED_WARNINGS_$(TOOLCHAIN_TYPE)_$(OPENJDK_TARGET_OS_VARIANT)_$$($1_FILENAME)))
+     endif
+ 
+     $1_BASE_CFLAGS :=  $$($$($1_BASE)_CFLAGS) $$($$($1_BASE)_EXTRA_CFLAGS) \
+@@ -743,21 +760,21 @@ define SetupNativeCompilationBody
+ 
+   # Pickup extra OPENJDK_TARGET_OS_TYPE, OPENJDK_TARGET_OS, TOOLCHAIN_TYPE and
+   # OPENJDK_TARGET_OS plus OPENJDK_TARGET_CPU pair dependent variables for CFLAGS.
+-  $1_EXTRA_CFLAGS := $$($1_CFLAGS_$(OPENJDK_TARGET_OS_TYPE)) $$($1_CFLAGS_$(OPENJDK_TARGET_OS)) \
++  $1_EXTRA_CFLAGS := $$($1_CFLAGS_$(OPENJDK_TARGET_OS_TYPE)) $$($1_CFLAGS_$(OPENJDK_TARGET_OS_VARIANT)) \
+       $$($1_CFLAGS_$(TOOLCHAIN_TYPE)) \
+-      $$($1_CFLAGS_$(OPENJDK_TARGET_OS)_$(OPENJDK_TARGET_CPU))
++      $$($1_CFLAGS_$(OPENJDK_TARGET_OS_VARIANT)_$(OPENJDK_TARGET_CPU))
+ 
+   ifneq ($(DEBUG_LEVEL), release)
+     # Pickup extra debug dependent variables for CFLAGS
+     $1_EXTRA_CFLAGS += $$($1_CFLAGS_debug)
+     $1_EXTRA_CFLAGS += $$($1_CFLAGS_$(OPENJDK_TARGET_OS_TYPE)_debug)
+-    $1_EXTRA_CFLAGS += $$($1_CFLAGS_$(OPENJDK_TARGET_OS)_debug)
+-    $1_EXTRA_CFLAGS += $$($1_CFLAGS_$(OPENJDK_TARGET_OS)_$(OPENJDK_TARGET_CPU)_debug)
++    $1_EXTRA_CFLAGS += $$($1_CFLAGS_$(OPENJDK_TARGET_OS_VARIANT)_debug)
++    $1_EXTRA_CFLAGS += $$($1_CFLAGS_$(OPENJDK_TARGET_OS_VARIANT)_$(OPENJDK_TARGET_CPU)_debug)
+   else
+     $1_EXTRA_CFLAGS += $$($1_CFLAGS_release)
+     $1_EXTRA_CFLAGS += $$($1_CFLAGS_$(OPENJDK_TARGET_OS_TYPE)_release)
+-    $1_EXTRA_CFLAGS += $$($1_CFLAGS_$(OPENJDK_TARGET_OS)_release)
+-    $1_EXTRA_CFLAGS += $$($1_CFLAGS_$(OPENJDK_TARGET_OS)_$(OPENJDK_TARGET_CPU)_release)
++    $1_EXTRA_CFLAGS += $$($1_CFLAGS_$(OPENJDK_TARGET_OS_VARIANT)_release)
++    $1_EXTRA_CFLAGS += $$($1_CFLAGS_$(OPENJDK_TARGET_OS_VARIANT)_$(OPENJDK_TARGET_CPU)_release)
+   endif
+   ifeq ($(STATIC_LIBS), true)
+     $1_EXTRA_CFLAGS += $$(STATIC_LIBS_CFLAGS)
+@@ -765,18 +782,18 @@ define SetupNativeCompilationBody
+ 
+   # Pickup extra OPENJDK_TARGET_OS_TYPE, OPENJDK_TARGET_OS and/or TOOLCHAIN_TYPE
+   # dependent variables for CXXFLAGS.
+-  $1_EXTRA_CXXFLAGS := $$($1_CXXFLAGS_$(OPENJDK_TARGET_OS_TYPE)) $$($1_CXXFLAGS_$(OPENJDK_TARGET_OS)) \
++  $1_EXTRA_CXXFLAGS := $$($1_CXXFLAGS_$(OPENJDK_TARGET_OS_TYPE)) $$($1_CXXFLAGS_$(OPENJDK_TARGET_OS_VARIANT)) \
+       $$($1_CXXFLAGS_$(TOOLCHAIN_TYPE))
+ 
+   ifneq ($(DEBUG_LEVEL), release)
+     # Pickup extra debug dependent variables for CXXFLAGS
+     $1_EXTRA_CXXFLAGS += $$($1_CXXFLAGS_debug)
+     $1_EXTRA_CXXFLAGS += $$($1_CXXFLAGS_$(OPENJDK_TARGET_OS_TYPE)_debug)
+-    $1_EXTRA_CXXFLAGS += $$($1_CXXFLAGS_$(OPENJDK_TARGET_OS)_debug)
++    $1_EXTRA_CXXFLAGS += $$($1_CXXFLAGS_$(OPENJDK_TARGET_OS_VARIANT)_debug)
+   else
+     $1_EXTRA_CXXFLAGS += $$($1_CXXFLAGS_release)
+     $1_EXTRA_CXXFLAGS += $$($1_CXXFLAGS_$(OPENJDK_TARGET_OS_TYPE)_release)
+-    $1_EXTRA_CXXFLAGS += $$($1_CXXFLAGS_$(OPENJDK_TARGET_OS)_release)
++    $1_EXTRA_CXXFLAGS += $$($1_CXXFLAGS_$(OPENJDK_TARGET_OS_VARIANT)_release)
+   endif
+   ifeq ($(STATIC_LIBS), true)
+     $1_EXTRA_CXXFLAGS += $$(STATIC_LIB_CFLAGS)
+@@ -811,15 +828,15 @@ define SetupNativeCompilationBody
+         $$(DISABLED_WARNINGS_C) \
+         $$($1_DISABLED_WARNINGS_$(TOOLCHAIN_TYPE)) \
+         $$($1_DISABLED_WARNINGS_C_$(TOOLCHAIN_TYPE)) \
+-        $$($1_DISABLED_WARNINGS_$(TOOLCHAIN_TYPE)_$(OPENJDK_TARGET_OS)) \
+-        $$($1_DISABLED_WARNINGS_C_$(TOOLCHAIN_TYPE)_$(OPENJDK_TARGET_OS)))
++        $$($1_DISABLED_WARNINGS_$(TOOLCHAIN_TYPE)_$(OPENJDK_TARGET_OS_VARIANT)) \
++        $$($1_DISABLED_WARNINGS_C_$(TOOLCHAIN_TYPE)_$(OPENJDK_TARGET_OS_VARIANT)))
+     $1_EXTRA_CXXFLAGS += $$(addprefix $(DISABLE_WARNING_PREFIX), \
+         $$(DISABLED_WARNINGS) \
+         $$(DISABLED_WARNINGS_CXX) \
+         $$($1_DISABLED_WARNINGS_$(TOOLCHAIN_TYPE)) \
+         $$($1_DISABLED_WARNINGS_CXX_$(TOOLCHAIN_TYPE)) \
+-        $$($1_DISABLED_WARNINGS_$(TOOLCHAIN_TYPE)_$(OPENJDK_TARGET_OS)) \
+-        $$($1_DISABLED_WARNINGS_CXX_$(TOOLCHAIN_TYPE)_$(OPENJDK_TARGET_OS)))
++        $$($1_DISABLED_WARNINGS_$(TOOLCHAIN_TYPE)_$(OPENJDK_TARGET_OS_VARIANT)) \
++        $$($1_DISABLED_WARNINGS_CXX_$(TOOLCHAIN_TYPE)_$(OPENJDK_TARGET_OS_VARIANT)))
+   endif
+ 
+   # Check if warnings should be considered errors.
+@@ -1040,10 +1057,10 @@ define SetupNativeCompilationBody
+   # dependent variables for LDFLAGS and LIBS, and additionally the pair dependent
+   # TOOLCHAIN_TYPE plus OPENJDK_TARGET_OS for LDFLAGS, or OPENJDK_TARGET_OS plus
+   # TOOLCHAIN_TYPE for LIBS
+-  $1_EXTRA_LDFLAGS += $$($1_LDFLAGS_$(OPENJDK_TARGET_OS_TYPE)) $$($1_LDFLAGS_$(OPENJDK_TARGET_OS)) \
+-      $$($1_LDFLAGS_$(TOOLCHAIN_TYPE)) $$($1_LDFLAGS_$(TOOLCHAIN_TYPE)_$(OPENJDK_TARGET_OS))
+-  $1_EXTRA_LIBS += $$($1_LIBS_$(OPENJDK_TARGET_OS_TYPE)) $$($1_LIBS_$(OPENJDK_TARGET_OS)) \
+-      $$($1_LIBS_$(OPENJDK_TARGET_OS)_$(TOOLCHAIN_TYPE)) $$($1_LIBS_$(TOOLCHAIN_TYPE))
++  $1_EXTRA_LDFLAGS += $$($1_LDFLAGS_$(OPENJDK_TARGET_OS_TYPE)) $$($1_LDFLAGS_$(OPENJDK_TARGET_OS_VARIANT)) \
++      $$($1_LDFLAGS_$(TOOLCHAIN_TYPE)) $$($1_LDFLAGS_$(TOOLCHAIN_TYPE)_$(OPENJDK_TARGET_OS_VARIANT))
++  $1_EXTRA_LIBS += $$($1_LIBS_$(OPENJDK_TARGET_OS_TYPE)) $$($1_LIBS_$(OPENJDK_TARGET_OS_VARIANT)) \
++      $$($1_LIBS_$(OPENJDK_TARGET_OS_VARIANT)_$(TOOLCHAIN_TYPE)) $$($1_LIBS_$(TOOLCHAIN_TYPE))
+ 
+   ifneq ($$($1_REAL_MAPFILE), )
+     $1_EXTRA_LDFLAGS += $(call SET_SHARED_LIBRARY_MAPFILE,$$($1_REAL_MAPFILE))
 diff --git a/make/hotspot/gensrc/GensrcAdlc.gmk b/make/hotspot/gensrc/GensrcAdlc.gmk
 index bb3564768..9eadfc316 100644
 --- a/make/hotspot/gensrc/GensrcAdlc.gmk
