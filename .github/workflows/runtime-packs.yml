@@ -1411,21 +1411,26 @@ jobs:
           # else has to be inside the pack: Android's linker refuses a
           # platform-internal library to an app, so "it exists in /system" is
           # not the same as "we can open it".
+          #
+          # libsync is deliberately absent: it is public on some devices and
+          # not on others, so the pack carries a copy and the bridge prefers
+          # the device's where there is one. Leaving it out here means the
+          # check holds the pack to the stricter of the two cases.
           SYSTEM = {
               "libc.so", "libm.so", "libdl.so", "liblog.so", "libandroid.so",
               "libz.so", "libEGL.so", "libGLESv1_CM.so", "libGLESv2.so",
               "libGLESv3.so", "libvulkan.so", "libjnigraphics.so",
-              "libnativewindow.so", "libsync.so", "libOpenSLES.so",
+              "libnativewindow.so", "libOpenSLES.so",
               "libaaudio.so", "libmediandk.so", "libcamera2ndk.so",
               "libneuralnetworks.so", "libstdc++.so",
           }
 
-          # Known and accepted, with what it costs. Mesa's Android platform
-          # reaches gralloc through these two, which are not public NDK
-          # libraries; they were stubbed at link time. Zink therefore cannot
-          # load on a device yet, which is why the index below does not offer
-          # it. gl4es needs neither and is unaffected.
-          ACCEPTED = {"libcutils.so", "libhardware.so"}
+          # No exceptions. This list used to hold libcutils and libhardware,
+          # and holding them is what let a pack ship a Zink backend that could
+          # not open its own libEGL - the check reported the gap and passed
+          # anyway. The pack now carries implementations of both, so they are
+          # found in `present` like anything else, and a future pack that lost
+          # them fails here instead of on a phone.
 
           present = {}
           for root, _, files in os.walk("stage"):
@@ -1443,14 +1448,13 @@ jobs:
                           missing[dep].append(name)
 
           print("%d shared objects in the pack" % len(present))
-          unexpected = {d: u for d, u in missing.items() if d not in ACCEPTED}
           for dep, users in sorted(missing.items()):
-              mark = "accepted" if dep in ACCEPTED else "UNRESOLVED"
-              print("  %-10s %-22s needed by %s" % (mark, dep, ", ".join(sorted(users)[:4])))
-          if unexpected:
-              print("\na dependency resolving nowhere fails the dlopen on the device", file=sys.stderr)
+              print("  UNRESOLVED %-22s needed by %s" % (dep, ", ".join(sorted(users)[:4])))
+          if missing:
+              print("\na dependency resolving nowhere fails the dlopen on the device",
+                    file=sys.stderr)
               sys.exit(1)
-          print("every dependency resolves, or is a known accepted gap")
+          print("every dependency resolves, inside the pack or in a public NDK library")
           PY
 
       - name: Write the pack index
