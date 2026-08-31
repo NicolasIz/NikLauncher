@@ -641,3 +641,102 @@ jobs:
         run: |
           echo "OpenJDK 21 did not configure for Android; see the output above." >&2
           exit 1
+
+      # The real test of the port. Configure only proves the build system
+      # accepts the target; this is where the hybrid actually compiles or does
+      # not - HotSpot's linux sources against Bionic, with -DLINUX and
+      # -D_ALLBSD_SOURCE both defined and os/linux and os/bsd headers on the
+      # path at once.
+      - name: Build the JDK image
+        id: build
+        continue-on-error: true
+        timeout-minutes: 120
+        run: |
+          set -euo pipefail
+          cd upstream-jdk
+          make images LOG=warn JOBS="$(nproc)" \
+            2>&1 | tee "$GITHUB_WORKSPACE/build-output.log"
+
+      - name: Report what the build said
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ -f build-output.log ]; then
+            echo "===== last 150 lines of the build ====="
+            tail -150 build-output.log
+            echo "===== error lines ====="
+            grep -nE 'error:|Error |\*\*\* ' build-output.log | head -40 || true
+          fi
+
+      - name: Fail if the build failed
+        if: steps.build.outcome == 'failure'
+        run: |
+          echo "OpenJDK 21 configured but did not build for Android." >&2
+          exit 1
+
+      - name: Collect and verify the runtime
+        run: |
+          set -euo pipefail
+          image=$(find upstream-jdk/build -maxdepth 2 -type d -name images -print -quit)/jdk
+          echo "image: $image"
+
+          if [ ! -f "$image/lib/server/libjvm.so" ]; then
+            echo "no libjvm.so in the image; the launcher has nothing to dlopen" >&2
+            find upstream-jdk/build -name 'libjvm.so' | head >&2
+            exit 1
+          fi
+
+          mkdir -p out
+          cp -a "$image" out/jdk
+
+          readelf=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf
+          echo "--- libjvm.so"
+          "$readelf" -h out/jdk/lib/server/libjvm.so | grep -E "Machine|Class"
+
+          # Every shared object in the runtime has to map on a 16 KB-page
+          # kernel, not just the one the launcher loads first.
+          bad=0
+          while read -r lib; do
+            for align in $("$readelf" -l "$lib" | awk '/LOAD/ {print $NF}'); do
+              if [ "$((align))" -lt 16384 ]; then
+                echo "PT_LOAD alignment $align below 16 KB in $lib" >&2
+                bad=1
+              fi
+            done
+          done < <(find out/jdk -name '*.so')
+          [ "$bad" -eq 0 ] || exit 1
+          echo "every shared object is 16 KB aligned"
+
+          echo "runtime size: $(du -sh out/jdk | cut -f1)"
+
+      - name: Describe the component
+        run: |
+          set -euo pipefail
+          cat > out/jdk/component.json <<JSON
+          {
+            "id": "openjdk",
+            "runtimeId": "java21",
+            "upstream": "https://github.com/openjdk/jdk21u",
+            "upstreamRef": "${OPENJDK_REF}",
+            "license": "GPL-2.0-with-classpath-exception",
+            "patch": "tools/openjdk/android-aarch64.patch",
+            "abi": "${ANDROID_ABI}",
+            "minSdk": ${ANDROID_API},
+            "libjvmPath": "lib/server/libjvm.so",
+            "maxPageSizeBytes": 16384
+          }
+          JSON
+          cat out/jdk/component.json
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          (cd out && tar -czf openjdk21-${ANDROID_ABI}.tar.gz jdk)
+          sha1sum out/openjdk21-${ANDROID_ABI}.tar.gz | tee out/openjdk21-${ANDROID_ABI}.tar.gz.sha1
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: openjdk21-${{ env.ANDROID_ABI }}
+          path: out/openjdk21-*.tar.gz*
+          if-no-files-found: error
