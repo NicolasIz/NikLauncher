@@ -53,11 +53,29 @@ it, and FFI is only wanted for the `zero` JVM variant.
 | `os_posix.cpp` | Bionic has no `CLK_TCK`; ask `sysconf` as Linux does |
 | `net_util_md.h` | Bionic wants `netinet/in.h` ahead of `netdb.h` |
 
-One deliberate difference from upstream. Mobile hardcodes
-`-target aarch64-linux-android32`; the patch reads `ANDROID_API_LEVEL` instead,
-defaulting to 32. The API level a runtime is built against decides the minimum
-Android version a pack will run on, so it belongs in one variable rather than
-buried as a literal in the build system.
+## The target triple is not in the OS defines
+
+Upstream puts `-target aarch64-linux-android32` inside `CFLAGS_OS_DEF_JVM` and
+`CFLAGS_OS_DEF_JDK`. This patch does not, and that is deliberate.
+
+Those variables are also applied when building the **buildjdk** - the JDK
+compiled for the *host* so it can run build tools during a cross-compile. A
+target triple there reaches the host compiler, which fails with:
+
+```
+g++: error: unrecognized command-line option '-target'
+```
+
+So the triple belongs in the compiler invocation instead. The build uses the
+NDK's per-API wrapper, `aarch64-linux-android<API>-clang`, which carries its own
+`-target`. That also makes the API level a single visible choice in the
+workflow rather than a literal buried in the build system - and the API level
+decides the minimum Android version an installed pack will run on.
+
+For the same reason the build passes `BUILD_CC=clang BUILD_CXX=clang++`. The
+build system takes one toolchain type for both host and target, so with
+`--with-toolchain-type=clang` the buildjdk is handed clang-only flags such as
+`-flimit-debug-info`; compiling it with gcc turns those into errors.
 
 ## Three files the Mobile Project never needed
 

@@ -567,7 +567,12 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq autoconf zip unzip build-essential file
+          # clang for the host as well as the NDK's clang for the target. The
+          # build system takes one toolchain type for both, so with
+          # --with-toolchain-type=clang the buildjdk - the JDK compiled for the
+          # host to run build tools - is handed clang-only flags. Giving it gcc
+          # makes those flags an error rather than a no-op.
+          sudo apt-get install -y -qq autoconf zip unzip build-essential file clang
 
       - name: Fetch OpenJDK 21
         run: |
@@ -596,6 +601,9 @@ jobs:
           set -euo pipefail
           tc=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64
           cd upstream-jdk
+          # The per-API clang wrapper carries -target itself, which is why the
+          # patch does not put the triple in the OS defines: those are applied
+          # to the buildjdk too, and a host compiler rejects them.
           # Captured rather than only streamed: when configure fails before it
           # creates a build directory there is no config.log to fall back on,
           # and its own output is the only account of what went wrong.
@@ -609,8 +617,10 @@ jobs:
             --with-debug-level=release \
             --enable-headless-only \
             --disable-warnings-as-errors \
-            CC="$tc/bin/clang" \
-            CXX="$tc/bin/clang++" \
+            CC="$tc/bin/aarch64-linux-android${ANDROID_API}-clang" \
+            CXX="$tc/bin/aarch64-linux-android${ANDROID_API}-clang++" \
+            BUILD_CC=clang \
+            BUILD_CXX=clang++ \
             AR="$tc/bin/llvm-ar" \
             STRIP="$tc/bin/llvm-strip" \
             NM="$tc/bin/llvm-nm" \

@@ -1,5 +1,5 @@
 diff --git a/make/autoconf/flags-cflags.m4 b/make/autoconf/flags-cflags.m4
-index ab8c48e16..be18a314a 100644
+index ab8c48e16..f300d2e48 100644
 --- a/make/autoconf/flags-cflags.m4
 +++ b/make/autoconf/flags-cflags.m4
 @@ -114,7 +114,7 @@ AC_DEFUN([FLAGS_SETUP_DEBUG_SYMBOLS],
@@ -11,28 +11,24 @@ index ab8c48e16..be18a314a 100644
      if test "x$ALLOW_ABSOLUTE_PATHS_IN_OUTPUT" = "xfalse"; then
        # Check if compiler supports -fdebug-prefix-map. If so, use that to make
        # the debug symbol paths resolve to paths relative to the workspace root.
-@@ -501,6 +501,10 @@ AC_DEFUN([FLAGS_SETUP_CFLAGS_HELPER],
+@@ -501,6 +501,9 @@ AC_DEFUN([FLAGS_SETUP_CFLAGS_HELPER],
      CFLAGS_OS_DEF_JDK="-D_ALLBSD_SOURCE"
    elif test "x$OPENJDK_TARGET_OS" = xwindows; then
      CFLAGS_OS_DEF_JVM="-D_WINDOWS -DWIN32 -D_JNI_IMPLEMENTATION_"
 +  elif test "x$OPENJDK_TARGET_OS" = xandroid; then
-+    NIK_ANDROID_API=${ANDROID_API_LEVEL:-32}
-+    CFLAGS_OS_DEF_JVM="-target aarch64-linux-android$NIK_ANDROID_API -DLINUX -D_ALLBSD_SOURCE -DANDROID"
-+    CFLAGS_OS_DEF_JDK="-target aarch64-linux-android$NIK_ANDROID_API -DLINUX -D__USE_BSD"
++    CFLAGS_OS_DEF_JVM="-DLINUX -D_ALLBSD_SOURCE -DANDROID"
++    CFLAGS_OS_DEF_JDK="-DLINUX -D__USE_BSD"
    fi
  
    CFLAGS_OS_DEF_JDK="$CFLAGS_OS_DEF_JDK -D$OPENJDK_TARGET_OS_UPPERCASE"
 diff --git a/make/autoconf/flags-other.m4 b/make/autoconf/flags-other.m4
-index 0af7c02cf..4fb245184 100644
+index 0af7c02cf..52f063df5 100644
 --- a/make/autoconf/flags-other.m4
 +++ b/make/autoconf/flags-other.m4
-@@ -110,6 +110,10 @@ AC_DEFUN([FLAGS_SETUP_ASFLAGS],
+@@ -110,6 +110,7 @@ AC_DEFUN([FLAGS_SETUP_ASFLAGS],
    fi
    AC_SUBST(BASIC_ASFLAGS)
  
-+  if test "x$OPENJDK_TARGET_OS" = xandroid; then
-+    JVM_BASIC_ASFLAGS="-target aarch64-linux-android"
-+  fi
 +
    if test "x$OPENJDK_TARGET_OS" = xmacosx; then
      JVM_BASIC_ASFLAGS="-mno-omit-leaf-frame-pointer -mstack-alignment=16"
