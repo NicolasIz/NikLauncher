@@ -106,6 +106,17 @@ mechanism.
 | `dll_path` | No `dlinfo(RTLD_DI_LINKMAP)` for applications; the path is diagnostic |
 | `ElfSymbolTable::compare` | `ELF32_ST_TYPE`/`ELF64_ST_TYPE` exist, the width-agnostic spelling does not |
 
+### Feature macros
+
+Upstream also sets `CFLAGS_OS_DEF_JDK="-DLINUX -D__USE_BSD"` for Android, where
+linux gets `-D_GNU_SOURCE -D_REENTRANT -D_LARGEFILE64_SOURCE`. This patch uses
+the linux set, because those are the sources being compiled.
+
+`__USE_BSD` is a libc-internal macro that a build should never define by hand.
+Dropping `_GNU_SOURCE` is the more damaging half: the preprocessor then cannot
+see constants that generated code needs, and `UnixConstants.java` comes out
+containing `X = X`, which javac rejects as a self-reference in an initializer.
+
 **This list is not known to be complete.** Each build round reveals only the
 errors the compiler reached before stopping.
 

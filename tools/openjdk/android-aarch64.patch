@@ -1,5 +1,5 @@
 diff --git a/make/autoconf/flags-cflags.m4 b/make/autoconf/flags-cflags.m4
-index ab8c48e16..f300d2e48 100644
+index ab8c48e16..0db4613d2 100644
 --- a/make/autoconf/flags-cflags.m4
 +++ b/make/autoconf/flags-cflags.m4
 @@ -114,7 +114,7 @@ AC_DEFUN([FLAGS_SETUP_DEBUG_SYMBOLS],
@@ -11,13 +11,19 @@ index ab8c48e16..f300d2e48 100644
      if test "x$ALLOW_ABSOLUTE_PATHS_IN_OUTPUT" = "xfalse"; then
        # Check if compiler supports -fdebug-prefix-map. If so, use that to make
        # the debug symbol paths resolve to paths relative to the workspace root.
-@@ -501,6 +501,9 @@ AC_DEFUN([FLAGS_SETUP_CFLAGS_HELPER],
+@@ -501,6 +501,15 @@ AC_DEFUN([FLAGS_SETUP_CFLAGS_HELPER],
      CFLAGS_OS_DEF_JDK="-D_ALLBSD_SOURCE"
    elif test "x$OPENJDK_TARGET_OS" = xwindows; then
      CFLAGS_OS_DEF_JVM="-D_WINDOWS -DWIN32 -D_JNI_IMPLEMENTATION_"
 +  elif test "x$OPENJDK_TARGET_OS" = xandroid; then
 +    CFLAGS_OS_DEF_JVM="-DLINUX -D_ALLBSD_SOURCE -DANDROID"
-+    CFLAGS_OS_DEF_JDK="-DLINUX -D__USE_BSD"
++    # The same feature macros as linux, because these are the sources being
++    # compiled. Upstream drops _GNU_SOURCE here and defines __USE_BSD instead;
++    # __USE_BSD is a libc-internal macro that no build should set by hand, and
++    # without _GNU_SOURCE the preprocessor cannot see constants that the
++    # generated UnixConstants.java needs - it emits "X = X" and javac rejects
++    # the self-reference.
++    CFLAGS_OS_DEF_JDK="-DLINUX -D_GNU_SOURCE -D_REENTRANT -D_LARGEFILE64_SOURCE"
    fi
  
    CFLAGS_OS_DEF_JDK="$CFLAGS_OS_DEF_JDK -D$OPENJDK_TARGET_OS_UPPERCASE"
