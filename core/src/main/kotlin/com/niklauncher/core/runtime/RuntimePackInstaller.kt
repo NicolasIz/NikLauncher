@@ -58,6 +58,9 @@ class RuntimePackInstaller(
         return withContext(Dispatchers.IO) { install(pack, runtime, onProgress) }
     }
 
+    override suspend fun installedPack(runtime: JavaRuntime): RuntimePack? =
+        withContext(Dispatchers.IO) { readManifest(runtime) }
+
     override suspend fun remove(runtime: JavaRuntime) = withContext(Dispatchers.IO) {
         paths.runtime(runtime.id).deleteRecursively()
         Unit

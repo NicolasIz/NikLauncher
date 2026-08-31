@@ -15,6 +15,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.ui.platform.LocalContext
+import com.niklauncher.app.game.GameActivity
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -51,6 +53,7 @@ import com.niklauncher.core.instance.Instance
 
 @Composable
 fun InstancesScreen(viewModel: LauncherViewModel) {
+    val context = LocalContext.current
     val instances by viewModel.instances.collectAsState()
     val runtimeState by viewModel.runtimeState.collectAsState()
     val settings by viewModel.settings.collectAsState()
@@ -113,6 +116,10 @@ fun InstancesScreen(viewModel: LauncherViewModel) {
                     InstanceCard(
                         instance = instance,
                         playable = runtimeState.ready,
+                        onPlay = {
+                            viewModel.rememberLastPlayed(instance.id)
+                            context.startActivity(GameActivity.intent(context, instance.id))
+                        },
                         onDelete = { viewModel.deleteInstance(instance.id) },
                     )
                 }
@@ -159,6 +166,7 @@ private fun EmptyInstances() {
 private fun InstanceCard(
     instance: Instance,
     playable: Boolean,
+    onPlay: () -> Unit,
     onDelete: () -> Unit,
 ) {
     Card(
@@ -210,7 +218,7 @@ private fun InstanceCard(
             }
 
             Button(
-                onClick = {},
+                onClick = onPlay,
                 enabled = playable,
                 modifier = Modifier
                     .fillMaxWidth()

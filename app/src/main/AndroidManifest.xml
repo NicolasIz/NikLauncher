@@ -34,6 +34,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+            Its own process, because the JNI Invocation API gives no way to tear
+            a VM down and build another: a second session needs a fresh process,
+            and a crash inside the game would otherwise take the launcher too.
+        -->
+        <activity
+            android:name=".game.GameActivity"
+            android:exported="false"
+            android:process=":runtime"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|density|uiMode|navigation"
+            android:screenOrientation="sensorLandscape"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.NikLauncher" />
     </application>
 
 </manifest>

@@ -34,6 +34,16 @@ interface NativeRuntimeProvider {
         onProgress: ((DownloadProgress) -> Unit)? = null,
     ): InstalledRuntime
 
+    /**
+     * The pack an installed runtime came from, or null when none is installed.
+     *
+     * The launcher needs this and not just [InstalledRuntime] because the pack
+     * is what declares its own layout - where each graphics backend's shared
+     * objects live. Re-deriving that at the call site is how the layout the
+     * pack was built with and the paths the launcher passes drift apart.
+     */
+    suspend fun installedPack(runtime: JavaRuntime): RuntimePack?
+
     suspend fun remove(runtime: JavaRuntime)
 }
 
@@ -69,6 +79,8 @@ class UnavailableRuntimeProvider : NativeRuntimeProvider {
         runtime: JavaRuntime,
         onProgress: ((DownloadProgress) -> Unit)?,
     ): InstalledRuntime = throw RuntimeNotInstalledException(runtime)
+
+    override suspend fun installedPack(runtime: JavaRuntime): RuntimePack? = null
 
     override suspend fun remove(runtime: JavaRuntime) = Unit
 }

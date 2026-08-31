@@ -253,6 +253,17 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch { container.instances.delete(instanceId) }
     }
 
+    /**
+     * Noted before the session starts rather than after it ends: a game process
+     * that crashes still tells us what the player was last trying to play,
+     * which is exactly when that is worth knowing.
+     */
+    fun rememberLastPlayed(instanceId: String) {
+        viewModelScope.launch {
+            container.settings.update { it.copy(lastPlayedInstanceId = instanceId) }
+        }
+    }
+
     fun updateSettings(transform: (LauncherSettings) -> LauncherSettings) {
         viewModelScope.launch { container.settings.update(transform) }
     }

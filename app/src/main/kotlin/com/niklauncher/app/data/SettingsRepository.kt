@@ -22,6 +22,7 @@ class SettingsRepository(private val context: Context) {
     suspend fun update(transform: (LauncherSettings) -> LauncherSettings) {
         context.settingsDataStore.edit { preferences ->
             val updated = transform(preferences.toSettings())
+            preferences[Keys.PLAYER_NAME] = updated.playerName
             preferences[Keys.MEMORY] = updated.defaultMemoryMegabytes
             preferences[Keys.PROFILE] = updated.defaultPerformanceProfileId
             preferences[Keys.KEEP_SCREEN_ON] = updated.keepScreenOn
@@ -39,6 +40,7 @@ class SettingsRepository(private val context: Context) {
     private fun Preferences.toSettings(): LauncherSettings {
         val defaults = LauncherSettings.DEFAULT
         return LauncherSettings(
+            playerName = this[Keys.PLAYER_NAME]?.takeIf { it.isNotBlank() } ?: defaults.playerName,
             defaultMemoryMegabytes = this[Keys.MEMORY] ?: defaults.defaultMemoryMegabytes,
             defaultPerformanceProfileId = this[Keys.PROFILE] ?: defaults.defaultPerformanceProfileId,
             keepScreenOn = this[Keys.KEEP_SCREEN_ON] ?: defaults.keepScreenOn,
@@ -52,6 +54,7 @@ class SettingsRepository(private val context: Context) {
     }
 
     private object Keys {
+        val PLAYER_NAME = stringPreferencesKey("player_name")
         val MEMORY = intPreferencesKey("default_memory_mb")
         val PROFILE = stringPreferencesKey("default_performance_profile")
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")

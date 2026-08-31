@@ -31,6 +31,12 @@ class AppContainer(context: Context) {
 
     val device: DeviceCapabilities = DeviceCapabilities.detect(applicationContext)
 
+    /**
+     * Where the APK's own libraries were unpacked - libglfw.so above all, which
+     * LWJGL resolves by name and so must be on the loader's path.
+     */
+    val nativeLibraryDir: String = applicationContext.applicationInfo.nativeLibraryDir
+
     val settings: SettingsRepository = SettingsRepository(applicationContext)
 
     val instances: InstanceRepository = InstanceRepository(paths)

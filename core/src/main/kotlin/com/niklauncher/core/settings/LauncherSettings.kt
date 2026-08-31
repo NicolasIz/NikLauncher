@@ -6,6 +6,12 @@ import kotlinx.serialization.Serializable
 /** Device-wide preferences, distinct from the per-instance settings. */
 @Serializable
 data class LauncherSettings(
+    /**
+     * The name an offline session plays under. Until Microsoft sign-in lands
+     * this is the only identity there is, and Minecraft derives the player's
+     * UUID from it, so changing it changes whose world you walk into.
+     */
+    val playerName: String = DEFAULT_PLAYER_NAME,
     val defaultMemoryMegabytes: Int = 2048,
     val defaultPerformanceProfileId: String = PerformanceProfile.BALANCED.id,
     /** Keep the screen awake while the game runs. */
@@ -31,6 +37,8 @@ data class LauncherSettings(
         get() = PerformanceProfile.fromId(defaultPerformanceProfileId) ?: PerformanceProfile.BALANCED
 
     companion object {
+        const val DEFAULT_PLAYER_NAME = "Player"
+
         val DEFAULT = LauncherSettings()
     }
 }
