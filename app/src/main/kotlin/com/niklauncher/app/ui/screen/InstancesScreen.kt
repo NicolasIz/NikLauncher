@@ -24,6 +24,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -46,9 +47,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.niklauncher.app.R
 import com.niklauncher.app.ui.LauncherViewModel
+import com.niklauncher.app.ui.RuntimeInstallState
 import com.niklauncher.app.ui.component.NikWordmark
-import com.niklauncher.app.ui.component.StatusCard
-import com.niklauncher.app.ui.component.StatusTone
 import com.niklauncher.core.instance.Instance
 
 @Composable
@@ -56,6 +56,7 @@ fun InstancesScreen(viewModel: LauncherViewModel) {
     val context = LocalContext.current
     val instances by viewModel.instances.collectAsState()
     val runtimeState by viewModel.runtimeState.collectAsState()
+    val runtimeInstall by viewModel.runtimeInstall.collectAsState()
     val settings by viewModel.settings.collectAsState()
     var showCreateDialog by remember { mutableStateOf(false) }
 
@@ -96,15 +97,17 @@ fun InstancesScreen(viewModel: LauncherViewModel) {
                 )
             }
 
-            // The runtime is not installable until Phase 2. Saying so plainly
-            // beats offering a Play button that cannot work.
+            // Without the runtime pack nothing can run, so this is the one
+            // thing the screen has to offer rather than merely report. It said
+            // the runtime would arrive "in Phase 2" long after the installer
+            // was written and tested, and never called it - which left a fresh
+            // install with an accurate-looking message and no way forward.
             if (runtimeState.checked && !runtimeState.ready) {
                 item {
-                    StatusCard(
-                        icon = Icons.Filled.Warning,
-                        title = stringResource(R.string.runtime_missing),
-                        body = stringResource(R.string.runtime_missing_body),
-                        tone = StatusTone.WARNING,
+                    RuntimeInstallCard(
+                        state = runtimeInstall,
+                        hasSource = runtimeState.hasPackSource,
+                        onInstall = viewModel::installRuntime,
                     )
                 }
             }
@@ -290,4 +293,125 @@ private fun CreateInstanceDialog(
             TextButton(onClick = onDismiss) { Text("Cancelar") }
         },
     )
+}
+
+/**
+ * The runtime pack, and the button that installs it.
+ *
+ * Everything the launcher does past this point needs the pack: it carries the
+ * JVM and the graphics translation layer. So this card is not a status
+ * message with a warning icon - it is the action, with the size named up
+ * front, the progress in megabytes rather than a bare bar, and the reason
+ * shown when it fails.
+ */
+@Composable
+private fun RuntimeInstallCard(
+    state: RuntimeInstallState,
+    hasSource: Boolean,
+    onInstall: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Warning,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+                Text(
+                    text = stringResource(R.string.runtime_missing),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            }
+
+            Text(
+                text = stringResource(R.string.runtime_missing_body),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+
+            when (state) {
+                is RuntimeInstallState.Idle -> {
+                    if (hasSource) {
+                        Button(onClick = onInstall, modifier = Modifier.fillMaxWidth()) {
+                            Text(stringResource(R.string.runtime_install))
+                        }
+                    } else {
+                        Text(
+                            text = stringResource(R.string.runtime_no_source),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    }
+                }
+
+                is RuntimeInstallState.Downloading -> {
+                    Text(
+                        text = stringResource(R.string.runtime_installing) + "  " +
+                            describeTransfer(state.transferred, state.total),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                    // Determinate whenever the server told us a length, so the
+                    // wait has an end the player can see.
+                    if (state.total > 0) {
+                        LinearProgressIndicator(
+                            progress = { state.fraction },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                }
+
+                is RuntimeInstallState.Verifying -> {
+                    Text(
+                        text = stringResource(R.string.runtime_verifying),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+
+                is RuntimeInstallState.Failed -> {
+                    Text(
+                        text = stringResource(R.string.runtime_install_failed),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    // The reason verbatim: "checksum did not match" and "no
+                    // compatible pack for this device" call for different
+                    // things, and only the message distinguishes them.
+                    Text(
+                        text = state.reason,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                    Button(onClick = onInstall, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.runtime_retry))
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** "128 MB de 249 MB" - megabytes, because a fraction alone says nothing about the wait. */
+private fun describeTransfer(transferred: Long, total: Long): String {
+    val mb = 1024L * 1024L
+    return if (total > 0) "${transferred / mb} MB de ${total / mb} MB" else "${transferred / mb} MB"
 }

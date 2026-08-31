@@ -16,7 +16,13 @@
 
     <string name="runtime_status_title">Estado del runtime</string>
     <string name="runtime_missing">Runtime de Java no instalado</string>
-    <string name="runtime_missing_body">NikLauncher necesita un runtime de Java para arm64 antes de poder ejecutar Minecraft. Se instalará en la Fase 2.</string>
+    <string name="runtime_missing_body">NikLauncher necesita un runtime de Java para arm64 antes de poder ejecutar Minecraft. Trae la máquina virtual y la capa gráfica, y ocupa unos 250 MB.</string>
+    <string name="runtime_install">Instalar el runtime</string>
+    <string name="runtime_installing">Descargando el runtime…</string>
+    <string name="runtime_verifying">Comprobando el archivo descargado…</string>
+    <string name="runtime_install_failed">No se pudo instalar el runtime</string>
+    <string name="runtime_retry">Reintentar</string>
+    <string name="runtime_no_source">Todavía no hay un origen de packs configurado, así que no hay nada que descargar.</string>
 
     <string name="settings_title">Ajustes</string>
     <string name="settings_memory">Memoria asignada</string>
@@ -28,5 +34,5 @@
 
     <string name="versions_title">Versiones</string>
     <string name="versions_offline_title">Catálogo no disponible</string>
-    <string name="versions_offline_body">La descarga del catálogo de versiones de Mojang llega en la Fase 2.</string>
+    <string name="versions_offline_body">No se pudo cargar el catálogo de versiones de Mojang. Comprueba la conexión y vuelve a intentarlo.</string>
 </resources>

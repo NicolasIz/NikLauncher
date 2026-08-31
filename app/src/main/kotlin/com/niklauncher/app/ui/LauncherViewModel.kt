@@ -19,6 +19,7 @@ import com.niklauncher.core.instance.ModLoader
 import com.niklauncher.core.runtime.GraphicsBackend
 import com.niklauncher.core.runtime.JavaRuntime
 import com.niklauncher.core.settings.LauncherSettings
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,6 +32,26 @@ import kotlinx.coroutines.withContext
 import java.util.UUID
 
 /** What the launcher knows about the native runtime layer right now. */
+/**
+ * How the runtime pack install is going.
+ *
+ * A pack is a few hundred megabytes, so this is never instantaneous and never
+ * something to hide behind a spinner with no numbers - and it is the one
+ * download the launcher cannot work without.
+ */
+sealed interface RuntimeInstallState {
+    data object Idle : RuntimeInstallState
+    data class Downloading(val fraction: Float, val transferred: Long, val total: Long) :
+        RuntimeInstallState
+    /**
+     * The bytes are down and the archive is being extracted and checked. Its
+     * own state because it takes real time on a pack this size, and a progress
+     * bar stuck at 100% with no explanation reads as a hang.
+     */
+    data object Verifying : RuntimeInstallState
+    data class Failed(val reason: String) : RuntimeInstallState
+}
+
 data class RuntimeState(
     val installed: List<JavaRuntime> = emptyList(),
     val backends: List<GraphicsBackend> = emptyList(),
@@ -52,6 +73,11 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
 
     private val _runtimeState = MutableStateFlow(RuntimeState())
     val runtimeState: StateFlow<RuntimeState> = _runtimeState.asStateFlow()
+
+    private val _runtimeInstall = MutableStateFlow<RuntimeInstallState>(RuntimeInstallState.Idle)
+    val runtimeInstall: StateFlow<RuntimeInstallState> = _runtimeInstall.asStateFlow()
+
+    private var runtimeInstallJob: Job? = null
 
     private val _catalogState = MutableStateFlow<CatalogState>(CatalogState.Loading)
     val catalogState: StateFlow<CatalogState> = _catalogState.asStateFlow()
@@ -293,6 +319,52 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             container.settings.update { it.copy(lastPlayedInstanceId = instanceId) }
         }
+    }
+
+    /**
+     * Downloads and installs the Java runtime pack.
+     *
+     * Nothing in the launcher works without this - it carries the JVM itself
+     * and the graphics translation - and until now nothing ever called it, so
+     * a fresh install had no way to become usable. The installer verifies the
+     * archive before reporting success, so reaching Idle here means the pack
+     * is on disk and its checksum matched.
+     */
+    fun installRuntime() {
+        if (runtimeInstallJob?.isActive == true) return
+        runtimeInstallJob = viewModelScope.launch {
+            _runtimeInstall.value = RuntimeInstallState.Downloading(0f, 0, 0)
+            try {
+                container.runtimeProvider.ensureInstalled(JavaRuntime.JRE_21) { progress ->
+                    _runtimeInstall.value = if (progress.fraction >= 1f) {
+                        RuntimeInstallState.Verifying
+                    } else {
+                        RuntimeInstallState.Downloading(
+                            fraction = progress.fraction,
+                            transferred = progress.bytesTransferred,
+                            total = progress.totalBytes,
+                        )
+                    }
+                }
+                // Extraction and checksum happen inside ensureInstalled; by the
+                // time it returns there is nothing left to wait for.
+                _runtimeInstall.value = RuntimeInstallState.Idle
+                refreshRuntimeState()
+            } catch (error: CancellationException) {
+                _runtimeInstall.value = RuntimeInstallState.Idle
+                throw error
+            } catch (error: Exception) {
+                _runtimeInstall.value = RuntimeInstallState.Failed(
+                    error.message ?: error::class.simpleName.orEmpty(),
+                )
+            }
+        }
+    }
+
+    fun cancelRuntimeInstall() {
+        runtimeInstallJob?.cancel()
+        runtimeInstallJob = null
+        _runtimeInstall.value = RuntimeInstallState.Idle
     }
 
     fun updateSettings(transform: (LauncherSettings) -> LauncherSettings) {
