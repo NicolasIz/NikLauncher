@@ -45,6 +45,19 @@ correctly: freetype is satisfied by the bundled copy the `lib-freetype.m4` hunk
 selects, ALSA is gated on the target being exactly `xlinux` so android misses
 it, and FFI is only wanted for the `zero` JVM variant.
 | `Modules.gmk`, `JdkNativeCompilation.gmk` | Take Java and native sources from the `linux` tree |
+
+`JdkNativeCompilation.gmk` has **two** lookups, `FindSrcDirsForLib` and
+`FindSrcDirsForComponent`, and both need the linux tree. Patching only the
+second builds a JDK that compiles and then fails at startup:
+
+```
+java.lang.UnsatisfiedLinkError: 'void sun.nio.ch.FileDispatcherImpl.init0()'
+```
+
+`FileDispatcherImpl.java`, which declares that native method, lives in
+`linux/classes` and was picked up. `FileDispatcherImpl.c`, which implements it,
+lives in `linux/native/libnio` and was not, because libraries are found through
+`FindSrcDirsForLib`. The Java and native halves disagreed.
 | `JvmFlags.gmk` | Put the linux and `linux_aarch64` include directories on the path |
 | `java.desktop/*.gmk` | No AWT, no sound |
 | `JvmMapfile.gmk` | Take the linux symbol-dump branch |
