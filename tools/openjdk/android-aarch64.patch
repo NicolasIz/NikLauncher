@@ -417,6 +417,28 @@ index b50d6f8bb..e477d6c3d 100644
    BUILD_LIBJVM_ostream.cpp_CXXFLAGS := -D_FILE_OFFSET_BITS=64
    BUILD_LIBJVM_logFileOutput.cpp_CXXFLAGS := -D_FILE_OFFSET_BITS=64
  
+diff --git a/make/modules/java.base/gensrc/GensrcMisc.gmk b/make/modules/java.base/gensrc/GensrcMisc.gmk
+index 578adce4e..07ed048d9 100644
+--- a/make/modules/java.base/gensrc/GensrcMisc.gmk
++++ b/make/modules/java.base/gensrc/GensrcMisc.gmk
+@@ -61,10 +61,16 @@ else
+ endif
+ 
+ # Normalize OPENJDK_TARGET_OS operating system name to match jdk.internal.util.OperatingSystem enum
++# The enum has no ANDROID constant, and adding one would break every exhaustive
++# switch over it in the JDK. It does not need one: LINUX is documented as
++# "operating systems based on the Linux kernel", and java.base here is compiled
++# from the linux sources, so TARGET_OS_IS_LINUX is what the rest of the code
++# expects to be true. Resolving through the variant is the same normalization
++# macosx already gets one line below.
+ ifeq ($(OPENJDK_TARGET_OS), macosx)
+   OPENJDK_TARGET_OS_CANONICAL = macos
+ else
+-  OPENJDK_TARGET_OS_CANONICAL := $(OPENJDK_TARGET_OS)
++  OPENJDK_TARGET_OS_CANONICAL := $(OPENJDK_TARGET_OS_VARIANT)
+ endif
+ 
+ $(eval $(call SetupTextFileProcessing, BUILD_PLATFORMPROPERTIES_JAVA, \
 diff --git a/make/modules/java.desktop/Gensrc.gmk b/make/modules/java.desktop/Gensrc.gmk
 index f76091079..d2be340f7 100644
 --- a/make/modules/java.desktop/Gensrc.gmk

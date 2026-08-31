@@ -67,6 +67,7 @@ lives in `linux/native/libnio` and was not, because libraries are found through
 | `JvmOverrideFiles.gmk` | Large-file support and the clang PCH exclusions |
 | `net_util_md.h` | Bionic wants `netinet/in.h` ahead of `netdb.h` |
 | `elfFile.hpp` | Do not redefine `ELF_ST_TYPE` when the libc already defines it |
+| `GensrcMisc.gmk` | Canonicalise the built-in OS name to `linux` |
 | `os_linux.cpp` | Two Bionic gaps in diagnostic code paths |
 
 ## The JVM's OS defines are the linux ones, unchanged
@@ -333,6 +334,45 @@ list for both targets: `linux` output is byte-identical to upstream's, and
 
 `jdk.jpackage/linux/classes` has four more properties files with the same
 shape, so it would have hit this too had the build reached it.
+
+## The JDK's own idea of which OS it is
+
+HotSpot compiled for the target, the interim image linked, and its `java`
+died on the first class it initialised:
+
+```
+java.lang.IllegalArgumentException: No enum constant
+    jdk.internal.util.OperatingSystem.ANDROID
+  at jdk.internal.util.OperatingSystem.initOS(OperatingSystem.java:134)
+```
+
+`OperatingSystem` is an enum of LINUX, MACOS, WINDOWS and AIX, and its value
+is baked in at build time: `PlatformProps.java.template` gets
+`@@OPENJDK_TARGET_OS@@` substituted, and `initOS` calls `valueOf` on it.
+
+Adding an `ANDROID` constant is the wrong fix. The enum is switched over
+exhaustively without a default in several places - the class javadoc shows one
+- so a fifth constant breaks each of them. And it would be wrong on its own
+terms: `LINUX` is documented as "operating systems based on the Linux kernel",
+which is what this is, and java.base here is compiled from the linux sources,
+so `TARGET_OS_IS_LINUX` is what the rest of the code expects to be true.
+
+`GensrcMisc.gmk` already normalizes the name for exactly this reason, because
+the enum spells macOS differently from the build:
+
+```make
+ifeq ($(OPENJDK_TARGET_OS), macosx)
+  OPENJDK_TARGET_OS_CANONICAL = macos
+else
+  OPENJDK_TARGET_OS_CANONICAL := $(OPENJDK_TARGET_OS_VARIANT)
+endif
+```
+
+Only the `else` changed, from `OPENJDK_TARGET_OS` to the variant. Checked for
+all five names: linux, windows and aix map to themselves, macosx still maps to
+macos, and android maps to linux. `PlatformProps.java.template` is the only
+template in the tree that substitutes an OS name at all, and this is the only
+site that canonicalises one, so one line covers it.
 
 ## Three files the Mobile Project never needed
 
