@@ -168,6 +168,19 @@ index 0eb0fb2dd..b81f69fed 100644
  SRC_SUBDIRS += share/classes
  
  SPEC_SUBDIRS += share/specs
+diff --git a/make/hotspot/gensrc/GensrcAdlc.gmk b/make/hotspot/gensrc/GensrcAdlc.gmk
+index bb3564768..9eadfc316 100644
+--- a/make/hotspot/gensrc/GensrcAdlc.gmk
++++ b/make/hotspot/gensrc/GensrcAdlc.gmk
+@@ -93,7 +93,7 @@ ifeq ($(call check-jvm-feature, compiler2), true)
+   ADLCFLAGS += -q -T
+ 
+   # ADLC flags depending on target OS
+-  ifeq ($(call isTargetOs, linux), true)
++  ifeq ($(call isTargetOs, linux android), true)
+     ADLCFLAGS += -DLINUX=1 -D_GNU_SOURCE=1
+   else ifeq ($(call isTargetOs, aix), true)
+     ADLCFLAGS += -DAIX=1
 diff --git a/make/hotspot/lib/JvmFlags.gmk b/make/hotspot/lib/JvmFlags.gmk
 index 1fadd5331..6e1449306 100644
 --- a/make/hotspot/lib/JvmFlags.gmk
@@ -186,6 +199,32 @@ index 1fadd5331..6e1449306 100644
  JVM_CFLAGS_INCLUDES += \
      $(patsubst %,-I%,$(JVM_SRC_DIRS)) \
      -I$(TOPDIR)/src/hotspot/share/precompiled \
+diff --git a/make/hotspot/lib/JvmMapfile.gmk b/make/hotspot/lib/JvmMapfile.gmk
+index b2199e7d1..d80754a93 100644
+--- a/make/hotspot/lib/JvmMapfile.gmk
++++ b/make/hotspot/lib/JvmMapfile.gmk
+@@ -52,7 +52,7 @@ endif
+ # Create a dynamic list of symbols from the built object files. This is highly
+ # platform dependent.
+ 
+-ifeq ($(call isTargetOs, linux), true)
++ifeq ($(call isTargetOs, linux android), true)
+   DUMP_SYMBOLS_CMD := $(NM) $(NMFLAGS) --defined-only *$(OBJ_SUFFIX)
+   ifneq ($(FILTER_SYMBOLS_PATTERN), )
+     FILTER_SYMBOLS_PATTERN := $(FILTER_SYMBOLS_PATTERN)|
+diff --git a/make/hotspot/lib/JvmOverrideFiles.gmk b/make/hotspot/lib/JvmOverrideFiles.gmk
+index b50d6f8bb..e477d6c3d 100644
+--- a/make/hotspot/lib/JvmOverrideFiles.gmk
++++ b/make/hotspot/lib/JvmOverrideFiles.gmk
+@@ -47,7 +47,7 @@ ifneq ($(FDLIBM_CFLAGS), )
+   LIBJVM_FDLIBM_COPY_OPT_FLAG := $(CXX_O_FLAG_NORM)
+ endif
+ 
+-ifeq ($(call isTargetOs, linux), true)
++ifeq ($(call isTargetOs, linux android), true)
+   BUILD_LIBJVM_ostream.cpp_CXXFLAGS := -D_FILE_OFFSET_BITS=64
+   BUILD_LIBJVM_logFileOutput.cpp_CXXFLAGS := -D_FILE_OFFSET_BITS=64
+ 
 diff --git a/make/modules/java.desktop/Gensrc.gmk b/make/modules/java.desktop/Gensrc.gmk
 index f76091079..d2be340f7 100644
 --- a/make/modules/java.desktop/Gensrc.gmk

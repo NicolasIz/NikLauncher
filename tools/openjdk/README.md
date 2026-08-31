@@ -47,6 +47,9 @@ it, and FFI is only wanted for the `zero` JVM variant.
 | `Modules.gmk`, `JdkNativeCompilation.gmk` | Take Java and native sources from the `linux` tree |
 | `JvmFlags.gmk` | Put the linux and `linux_aarch64` include directories on the path |
 | `java.desktop/*.gmk` | No AWT, no sound |
+| `JvmMapfile.gmk` | Take the linux symbol-dump branch |
+| `GensrcAdlc.gmk` | Give ADLC the linux OS defines |
+| `JvmOverrideFiles.gmk` | Large-file support and the clang PCH exclusions |
 | `os_posix.cpp` | Bionic has no `CLK_TCK`; ask `sysconf` as Linux does |
 | `net_util_md.h` | Bionic wants `netinet/in.h` ahead of `netdb.h` |
 
@@ -55,6 +58,26 @@ One deliberate difference from upstream. Mobile hardcodes
 defaulting to 32. The API level a runtime is built against decides the minimum
 Android version a pack will run on, so it belongs in one variable rather than
 buried as a literal in the build system.
+
+## Three files the Mobile Project never needed
+
+`JvmMapfile.gmk`, `GensrcAdlc.gmk` and `JvmOverrideFiles.gmk` are not in
+upstream's Android support, because JDK 28 restructured or does not have them.
+Porting to 21 therefore is not just "apply what Mobile has" - files that exist
+in 21 and not in 28 need their own handling.
+
+Only `JvmMapfile.gmk` announced itself, with
+`*** Unknown target OS android`. The other two would have taken no branch at
+all and built quietly: ADLC would have generated C2's machine description with
+no OS define, and libjvm would have lost large-file support in the two files
+that do file I/O plus the precompiled-header exclusions clang needs for the
+fdlibm sources. Those were found by reading every `isTargetOs, linux` dispatch
+under `make/hotspot`, not by a build failure.
+
+Three others in that sweep are genuinely harmless and were deliberately left
+alone: `CompileJvm.gmk` only acts when `HOTSPOT_TARGET_CPU_ARCH` is `arm`,
+`JvmFeatures.gmk` only under the `minimal` JVM variant, and `GensrcDtrace.gmk`
+only when dtrace is enabled.
 
 ## Ordering matters
 
