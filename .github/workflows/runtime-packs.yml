@@ -852,20 +852,29 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq meson ninja-build python3-mako bison flex \
-            glslang-tools cmake pkg-config
+          sudo apt-get install -y -qq bison flex glslang-tools cmake pkg-config
+          python3 -m pip install --quiet --upgrade meson ninja mako pyyaml
 
+      # Identical to the real mesa job's cross file, pkg_config_libdir included.
+      # Without it every candidate dies at the libdrm lookup before it can say
+      # anything about libcutils, which is what the earlier probe did.
       - name: Write the NDK cross file
         run: |
           set -euo pipefail
           tc=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin
-          cat > cross.ini <<INI
+          deps=$GITHUB_WORKSPACE/android-deps
+          mkdir -p "$deps/lib/pkgconfig"
+          cat > cross-android-arm64.ini <<INI
           [binaries]
           c = '$tc/aarch64-linux-android${ANDROID_API}-clang'
           cpp = '$tc/aarch64-linux-android${ANDROID_API}-clang++'
           ar = '$tc/llvm-ar'
           strip = '$tc/llvm-strip'
           pkg-config = 'pkg-config'
+
+          [properties]
+          pkg_config_libdir = '$deps/lib/pkgconfig'
+
           [host_machine]
           system = 'android'
           cpu_family = 'aarch64'
@@ -873,55 +882,187 @@ jobs:
           endian = 'little'
           INI
 
+      - name: Cross-compile libdrm
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch "$LIBDRM_REF" \
+            https://gitlab.freedesktop.org/mesa/drm.git upstream-drm
+          meson setup upstream-drm/build-android upstream-drm \
+            --cross-file "$GITHUB_WORKSPACE/cross-android-arm64.ini" \
+            --prefix "$GITHUB_WORKSPACE/android-deps" \
+            --buildtype release \
+            -Dintel=disabled -Dradeon=disabled -Damdgpu=disabled \
+            -Dnouveau=disabled -Dvmwgfx=disabled -Dfreedreno=disabled \
+            -Dvc4=disabled -Detnaviv=disabled \
+            -Dcairo-tests=disabled -Dman-pages=disabled \
+            -Dvalgrind=disabled -Dtests=false \
+            -Dc_link_args=-Wl,-z,max-page-size=16384 \
+            -Dcpp_link_args=-Wl,-z,max-page-size=16384 > /dev/null
+          meson compile -C upstream-drm/build-android > /dev/null
+          meson install -C upstream-drm/build-android > /dev/null
+          ls "$GITHUB_WORKSPACE/android-deps/lib"
+
       - name: Fetch Mesa
         run: |
           set -euo pipefail
           git clone --depth 1 --branch "$MESA_REF" \
             https://gitlab.freedesktop.org/mesa/mesa.git upstream-mesa
+          echo "Mesa $MESA_REF at $(git -C upstream-mesa rev-parse --short HEAD)"
 
-      - name: What the current configuration depends on, and what the alternatives do
+      # This repository cannot reach gitlab.freedesktop.org, so the source that
+      # decides the architecture is read here and printed into the log. What is
+      # being decided: libcutils and libhardware are the two libraries Android
+      # refuses to hand an app, and they are the only reason Zink cannot load.
+      # Mesa builds its own stand-ins under src/android_stub for exactly the
+      # case of building without an AOSP tree - so the question is what those
+      # stand-ins actually implement, and whether the EGL path needs more.
+      - name: Read what Mesa's Android support actually requires
         run: |
           set -euo pipefail
+          cd upstream-mesa
 
-          echo "===== android platform options meson exposes ====="
-          (cd upstream-mesa && meson configure build-probe 2>/dev/null || true)
-          grep -nE 'android|platforms' upstream-mesa/meson_options.txt | head -30 || true
+          echo "===== src/android_stub/meson.build ====="
+          cat src/android_stub/meson.build
 
-          # Each candidate is configured and, if it configures, built far enough
-          # to produce a libEGL whose DT_NEEDED can be read. What matters is
-          # whether libcutils and libhardware appear: those are the two Android
-          # refuses to hand an app, and they are why Zink cannot load today.
+          echo
+          echo "===== the stub sources ====="
+          for f in src/android_stub/*.c src/android_stub/*.cpp; do
+            [ -e "$f" ] || continue
+            echo "--- $f ($(wc -l < "$f") lines)"
+            cat "$f"
+          done
+
+          echo
+          echo "===== where the build asks for cutils / hardware / nativewindow ====="
+          grep -rnE "libcutils|libhardware|cutils|hardware'|nativewindow" \
+            --include=meson.build . | head -40
+
+          echo
+          echo "===== what android-stub gates ====="
+          grep -n "android_stub\|android-stub\|with_android_stub" meson.build | head -20
+
+          echo
+          echo "===== hw_get_module callers ====="
+          grep -rn "hw_get_module" --include=*.c --include=*.cpp --include=*.h src | head -20
+
+          echo
+          echo "===== u_gralloc backends ====="
+          ls src/util/u_gralloc 2>/dev/null || echo "(no u_gralloc in this release)"
+
+          echo
+          echo "===== the platform option ====="
+          sed -n "/option( *'platforms'/,/^)/p" meson.options 2>/dev/null \
+            || sed -n "/option( *'platforms'/,/^)/p" meson_options.txt
+
+          echo
+          echo "===== the osmesa option ====="
+          sed -n "/option( *'osmesa'/,/^)/p" meson.options 2>/dev/null \
+            || sed -n "/option( *'osmesa'/,/^)/p" meson_options.txt
+
+      # Each candidate is configured, built far enough to produce the library
+      # the launcher would dlopen, and then read for its real DT_NEEDED. A
+      # candidate that needs neither libcutils nor libhardware - or that needs
+      # only ones Mesa itself builds and we may therefore ship - is one an
+      # Android app can actually open.
+      - name: Configure and build each candidate
+        run: |
+          set -euo pipefail
+          readelf=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf
+          nm=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm
+
           probe() {
             local name=$1; shift
             echo
-            echo "===== $name ====="
+            echo "############################################################"
+            echo "##### $name"
+            echo "############################################################"
             rm -rf "build-$name"
             if ! meson setup "build-$name" upstream-mesa \
-                --cross-file cross.ini --buildtype release \
+                --cross-file "$GITHUB_WORKSPACE/cross-android-arm64.ini" \
+                --buildtype release \
                 -Dgallium-drivers=zink -Dvulkan-drivers= \
                 -Dopengl=true -Dglx=disabled -Dgbm=disabled -Dllvm=disabled \
-                -Dshared-glapi=enabled "$@" > "setup-$name.log" 2>&1; then
-              echo "  configure FAILED:"
-              tail -12 "setup-$name.log" | sed 's/^/    /'
+                -Dshared-glapi=enabled \
+                -Dc_link_args=-Wl,-z,max-page-size=16384 \
+                -Dcpp_link_args=-Wl,-z,max-page-size=16384 \
+                "$@" > "setup-$name.log" 2>&1; then
+              echo "configure FAILED:"
+              tail -20 "setup-$name.log" | sed 's/^/    /'
               return 0
             fi
-            echo "  configured"
-            if ! ninja -C "build-$name" src/egl/libEGL.so.1.0.0 > "build-$name.log" 2>&1; then
-              echo "  build FAILED:"
-              grep -E 'error|Error' "build-$name.log" | head -8 | sed 's/^/    /'
+            echo "configured"
+            if ! meson compile -C "build-$name" > "build-$name.log" 2>&1; then
+              echo "build FAILED:"
+              grep -iE "error" "build-$name.log" | head -15 | sed 's/^/    /'
+              echo "  (tail)"
+              tail -15 "build-$name.log" | sed 's/^/    /'
               return 0
             fi
+            echo "built"
+            echo
+            echo "--- shared objects produced"
+            find "build-$name" -name '*.so*' -type f | sort | sed 's/^/    /'
+            echo
+            echo "--- what each one needs"
             local so
-            so=$(find "build-$name" -name 'libEGL.so*' -type f | head -n 1)
-            echo "  built $so"
-            echo "  needs: $(readelf -dW "$so" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | tr '\n' ' ')"
+            for so in $(find "build-$name" -name '*.so' -type f | sort); do
+              case "$so" in
+                */android_stub/*) echo "    [stub] $so"
+                                  echo "        defines: $("$nm" -D --defined-only "$so" \
+                                      | awk '$2 ~ /^[TWD]$/ {print $3}' | tr '\n' ' ')" ;;
+                *) echo "    $so"
+                   echo "        needs: $("$readelf" -dW "$so" \
+                       | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | tr '\n' ' ')" ;;
+              esac
+            done
+            echo
+            echo "--- verdict for $name"
+            local blockers=""
+            for so in $(find "build-$name" -name '*.so' -type f -not -path '*/android_stub/*'); do
+              blockers="$blockers $("$readelf" -dW "$so" \
+                | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' \
+                | grep -E 'libcutils|libhardware' || true)"
+            done
+            blockers=$(echo $blockers | tr ' ' '\n' | sort -u | tr '\n' ' ')
+            if [ -z "${blockers// /}" ]; then
+              echo "    no libcutils / libhardware anywhere: loadable by an app as-is"
+            else
+              echo "    still needs:$blockers"
+            fi
           }
 
-          probe current      -Dplatforms=android -Dandroid-stub=true -Dandroid-strict=false -Dplatform-sdk-version=${ANDROID_API} -Degl=enabled
-          probe surfaceless  -Dplatforms=          -Degl=enabled
+          # 1. What the pack ships today, and why Zink cannot load.
+          probe current \
+            -Dplatforms=android -Dandroid-stub=true -Dandroid-strict=false \
+            -Dplatform-sdk-version=${ANDROID_API} -Degl=enabled
+
+          # 2. No window platform at all. EGL keeps its surfaceless and device
+          #    platforms, which need no gralloc - at the cost of having to blit
+          #    to the ANativeWindow ourselves.
+          probe surfaceless \
+            -Dplatforms= -Degl=enabled
+
+          # 3. No EGL either: render through OSMesa into memory we own. The
+          #    coarsest option, and the one with the fewest platform demands.
+          probe osmesa \
+            -Dplatforms= -Degl=disabled -Dosmesa=true
+
           echo
-          echo "A configuration whose libEGL needs neither libcutils nor libhardware is one"
-          echo "an Android app can actually open."
+          echo "############################################################"
+          echo "Read the verdict lines above: they decide whether Zink can be"
+          echo "loaded with libraries we are allowed to ship, and if so, which"
+          echo "windowing path the GLFW bridge has to implement."
+          echo "############################################################"
+
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mesa-probe-logs
+          path: |
+            setup-*.log
+            build-*.log
+          if-no-files-found: warn
 
 ################################################################################
 # Assembles the four components into the single archive the launcher installs.
