@@ -825,3 +825,166 @@ jobs:
           name: openjdk21-${{ env.ANDROID_ABI }}
           path: out/openjdk21-*.tar.gz*
           if-no-files-found: error
+
+################################################################################
+# Assembles the four components into the single archive the launcher installs.
+#
+# The launcher extracts a pack into one directory and then looks for libjvm.so
+# at the path the pack declares, so the JDK image has to sit at the root. Each
+# graphics backend gets its own directory carrying its own copy of the LWJGL
+# natives, because org.lwjgl.librarypath is a single directory and is also
+# where LWJGL finds its own libraries - the shape is defined and tested in
+# :core's RuntimePackLayoutTest, and asserted against the real archive below.
+  assemble:
+    name: Assemble the runtime pack
+    needs: [gl4es, lwjgl, mesa, openjdk]
+    if: ${{ inputs.openjdk }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out NikLauncher
+        uses: actions/checkout@v4
+
+      - name: Download the components
+        uses: actions/download-artifact@v4
+        with:
+          path: components
+
+      - name: Unpack them
+        run: |
+          set -euo pipefail
+          mkdir -p unpacked
+          for archive in $(find components -name '*.tar.gz' | sort); do
+            echo "unpacking $archive"
+            tar -xzf "$archive" -C unpacked
+          done
+          echo "component trees:"
+          find unpacked -maxdepth 1 -mindepth 1 -type d | sort
+
+      - name: Stage the pack
+        run: |
+          set -euo pipefail
+          stage=stage
+          rm -rf "$stage"
+          mkdir -p "$stage"
+
+          # The JDK image at the root, so libjvmPath is lib/server/libjvm.so.
+          cp -a unpacked/jdk/. "$stage/"
+          rm -f "$stage/component.json"
+
+          # One self-contained directory per backend. Mesa carries Zink;
+          # gl4es carries its own libGL. Both also get the LWJGL natives,
+          # since librarypath points at exactly one of these directories.
+          for backend in zink gl4es; do
+            mkdir -p "$stage/nikgraphics/$backend"
+          done
+          cp -a unpacked/mesa/. "$stage/nikgraphics/zink/"
+          cp -a unpacked/gl4es/. "$stage/nikgraphics/gl4es/"
+          for backend in zink gl4es; do
+            cp -a unpacked/lwjgl/. "$stage/nikgraphics/$backend/"
+            rm -f "$stage/nikgraphics/$backend/component.json"
+          done
+
+          echo "staged:"
+          du -sh "$stage"
+          ls "$stage/nikgraphics/zink" "$stage/nikgraphics/gl4es"
+
+      - name: Package
+        id: package
+        run: |
+          set -euo pipefail
+          name="nikruntime-java21-${ANDROID_ABI}.tar.gz"
+          # -C stage . so the archive's entries are the pack's own root: the
+          # launcher extracts into one directory and expects no wrapper.
+          tar -czf "$name" -C stage .
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "sha1=$(sha1sum "$name" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "size=$(stat -c%s "$name")" >> "$GITHUB_OUTPUT"
+          ls -la "$name"
+
+      - name: Check the archive is what the launcher expects
+        run: |
+          set -euo pipefail
+          # Extracted the way RuntimePackInstaller does, and checked against the
+          # paths the index is about to declare. An archive that packages
+          # correctly but extracts into the wrong shape would otherwise only
+          # fail on a phone.
+          rm -rf verify && mkdir verify
+          tar -xzf "${{ steps.package.outputs.name }}" -C verify
+
+          fail=0
+          require() {
+            if [ ! -e "verify/$1" ]; then echo "missing: $1" >&2; fail=1;
+            else echo "  ok  $1"; fi
+          }
+          require lib/server/libjvm.so
+          require bin/java
+          require nikgraphics/zink/libEGL.so
+          require nikgraphics/zink/liblwjgl.so
+          require nikgraphics/gl4es/libGL.so
+          require nikgraphics/gl4es/liblwjgl.so
+          [ "$fail" -eq 0 ] || exit 1
+
+          # No wrapper directory: a pack that extracted into ./nikruntime/...
+          # would put libjvm.so one level below where the manifest says.
+          if [ -d verify/jdk ] || [ -d verify/stage ]; then
+            echo "the archive has a wrapper directory; libjvmPath would be wrong" >&2
+            exit 1
+          fi
+          echo "archive layout matches the manifest"
+
+      - name: Write the pack index
+        run: |
+          set -euo pipefail
+          # jdk-21.0.12+8 -> 21.0.12, which is what VersionComparator orders.
+          version=${OPENJDK_REF#jdk-}
+          version=${version%%+*}
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/runtime-packs"
+
+          cat > runtime-packs.json <<JSON
+          {
+            "schemaVersion": 1,
+            "packs": [
+              {
+                "id": "nikruntime-java21-${ANDROID_ABI}",
+                "runtimeId": "java21",
+                "version": "${version}",
+                "abi": "${ANDROID_ABI}",
+                "url": "${base}/${{ steps.package.outputs.name }}",
+                "sha1": "${{ steps.package.outputs.sha1 }}",
+                "size": ${{ steps.package.outputs.size }},
+                "libjvmPath": "lib/server/libjvm.so",
+                "providedClasspath": [],
+                "graphicsBackendIds": ["zink", "gl4es"],
+                "graphicsDirectory": "nikgraphics",
+                "maxPageSizeBytes": 16384
+              }
+            ]
+          }
+          JSON
+          python3 -m json.tool runtime-packs.json
+          echo "(the url above resolves only once the pack is published)"
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-pack-${{ env.ANDROID_ABI }}
+          path: |
+            nikruntime-java21-*.tar.gz
+            runtime-packs.json
+          if-no-files-found: error
+
+      - name: Publish
+        if: ${{ inputs.publish }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Recreated so the tag always names the pack currently indexed.
+          gh release delete runtime-packs --yes --cleanup-tag 2>/dev/null || true
+          gh release create runtime-packs \
+            "${{ steps.package.outputs.name }}" runtime-packs.json \
+            --title "NikLauncher runtime packs" \
+            --notes "Built from the sources named in each component.json. The launcher reads runtime-packs.json from this release." \
+            --target "$GITHUB_SHA"
+          gh release view runtime-packs --json url --jq .url

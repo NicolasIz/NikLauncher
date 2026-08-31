@@ -30,6 +30,14 @@ data class RuntimePack(
     /** Graphics backends bundled with this pack, by [GraphicsBackend.id]. */
     val graphicsBackendIds: List<String> = emptyList(),
     /**
+     * Where the pack keeps each backend's shared objects, relative to its root.
+     *
+     * Data rather than a constant for the same reason [libjvmPath] is: the
+     * layout is part of what a published pack declares about itself, so a
+     * future pack can move it without needing a new launcher.
+     */
+    val graphicsDirectory: String = DEFAULT_GRAPHICS_DIRECTORY,
+    /**
      * Largest kernel page size the pack's shared objects are aligned for.
      *
      * A pack built for 4 KB pages will not map on a 16 KB-page kernel, so this
@@ -44,8 +52,22 @@ data class RuntimePack(
 
     fun supportsPageSize(devicePageSizeBytes: Int): Boolean = maxPageSizeBytes >= devicePageSizeBytes
 
+    /**
+     * The directory holding [backend]'s shared objects, relative to the pack
+     * root.
+     *
+     * One directory per backend, and each carries its own copy of the LWJGL
+     * natives, because `org.lwjgl.librarypath` is a single directory and is
+     * also where LWJGL looks for its own libraries - so a backend's directory
+     * has to be self-contained. The duplication is a few hundred kilobytes
+     * against a runtime of a couple of hundred megabytes.
+     */
+    fun libraryDirectoryFor(backend: GraphicsBackend): String =
+        graphicsDirectory.trimEnd('/') + "/" + backend.id
+
     companion object {
         const val DEFAULT_ABI = "arm64-v8a"
+        const val DEFAULT_GRAPHICS_DIRECTORY = "nikgraphics"
     }
 }
 
