@@ -17,6 +17,10 @@ on:
       # "without building" long after the job stopped being a probe and started
       # building the image, which is a good way to read a green run as proof of
       # something that never ran.
+      probe_mesa:
+        description: "Probe which Mesa configurations avoid Android's private libraries"
+        type: boolean
+        default: false
       openjdk:
         description: "Build OpenJDK 21 for Android (slow, ~1h)"
         type: boolean
@@ -825,6 +829,99 @@ jobs:
           name: openjdk21-${{ env.ANDROID_ABI }}
           path: out/openjdk21-*.tar.gz*
           if-no-files-found: error
+
+  mesa_probe:
+    name: Probe Mesa configurations
+    if: ${{ inputs.probe_mesa }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out NikLauncher
+        uses: actions/checkout@v4
+
+      - name: Set up the Android SDK and NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install the NDK
+        run: |
+          set -euo pipefail
+          sdkmanager --install "ndk;${NDK_VERSION}" > /dev/null
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Install Mesa's build prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq meson ninja-build python3-mako bison flex \
+            glslang-tools cmake pkg-config
+
+      - name: Write the NDK cross file
+        run: |
+          set -euo pipefail
+          tc=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin
+          cat > cross.ini <<INI
+          [binaries]
+          c = '$tc/aarch64-linux-android${ANDROID_API}-clang'
+          cpp = '$tc/aarch64-linux-android${ANDROID_API}-clang++'
+          ar = '$tc/llvm-ar'
+          strip = '$tc/llvm-strip'
+          pkg-config = 'pkg-config'
+          [host_machine]
+          system = 'android'
+          cpu_family = 'aarch64'
+          cpu = 'aarch64'
+          endian = 'little'
+          INI
+
+      - name: Fetch Mesa
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch "$MESA_REF" \
+            https://gitlab.freedesktop.org/mesa/mesa.git upstream-mesa
+
+      - name: What the current configuration depends on, and what the alternatives do
+        run: |
+          set -euo pipefail
+
+          echo "===== android platform options meson exposes ====="
+          (cd upstream-mesa && meson configure build-probe 2>/dev/null || true)
+          grep -nE 'android|platforms' upstream-mesa/meson_options.txt | head -30 || true
+
+          # Each candidate is configured and, if it configures, built far enough
+          # to produce a libEGL whose DT_NEEDED can be read. What matters is
+          # whether libcutils and libhardware appear: those are the two Android
+          # refuses to hand an app, and they are why Zink cannot load today.
+          probe() {
+            local name=$1; shift
+            echo
+            echo "===== $name ====="
+            rm -rf "build-$name"
+            if ! meson setup "build-$name" upstream-mesa \
+                --cross-file cross.ini --buildtype release \
+                -Dgallium-drivers=zink -Dvulkan-drivers= \
+                -Dopengl=true -Dglx=disabled -Dgbm=disabled -Dllvm=disabled \
+                -Dshared-glapi=enabled "$@" > "setup-$name.log" 2>&1; then
+              echo "  configure FAILED:"
+              tail -12 "setup-$name.log" | sed 's/^/    /'
+              return 0
+            fi
+            echo "  configured"
+            if ! ninja -C "build-$name" src/egl/libEGL.so.1.0.0 > "build-$name.log" 2>&1; then
+              echo "  build FAILED:"
+              grep -E 'error|Error' "build-$name.log" | head -8 | sed 's/^/    /'
+              return 0
+            fi
+            local so
+            so=$(find "build-$name" -name 'libEGL.so*' -type f | head -n 1)
+            echo "  built $so"
+            echo "  needs: $(readelf -dW "$so" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | tr '\n' ' ')"
+          }
+
+          probe current      -Dplatforms=android -Dandroid-stub=true -Dandroid-strict=false -Dplatform-sdk-version=${ANDROID_API} -Degl=enabled
+          probe surfaceless  -Dplatforms=          -Degl=enabled
+          echo
+          echo "A configuration whose libEGL needs neither libcutils nor libhardware is one"
+          echo "an Android app can actually open."
 
 ################################################################################
 # Assembles the four components into the single archive the launcher installs.
