@@ -171,7 +171,7 @@ index 0eb0fb2dd..b81f69fed 100644
  
  SPEC_SUBDIRS += share/specs
 diff --git a/make/common/NativeCompilation.gmk b/make/common/NativeCompilation.gmk
-index 24e76ddc2..feae456c7 100644
+index 24e76ddc2..88f70dad7 100644
 --- a/make/common/NativeCompilation.gmk
 +++ b/make/common/NativeCompilation.gmk
 @@ -34,6 +34,23 @@ ifeq ($(_MAKEBASE_GMK), )
@@ -277,7 +277,7 @@ index 24e76ddc2..feae456c7 100644
    endif
  
    # Check if warnings should be considered errors.
-@@ -1040,10 +1057,10 @@ define SetupNativeCompilationBody
+@@ -1040,10 +1057,19 @@ define SetupNativeCompilationBody
    # dependent variables for LDFLAGS and LIBS, and additionally the pair dependent
    # TOOLCHAIN_TYPE plus OPENJDK_TARGET_OS for LDFLAGS, or OPENJDK_TARGET_OS plus
    # TOOLCHAIN_TYPE for LIBS
@@ -289,6 +289,15 @@ index 24e76ddc2..feae456c7 100644
 +      $$($1_LDFLAGS_$(TOOLCHAIN_TYPE)) $$($1_LDFLAGS_$(TOOLCHAIN_TYPE)_$(OPENJDK_TARGET_OS_VARIANT))
 +  $1_EXTRA_LIBS += $$($1_LIBS_$(OPENJDK_TARGET_OS_TYPE)) $$($1_LIBS_$(OPENJDK_TARGET_OS_VARIANT)) \
 +      $$($1_LIBS_$(OPENJDK_TARGET_OS_VARIANT)_$(TOOLCHAIN_TYPE)) $$($1_LIBS_$(TOOLCHAIN_TYPE))
++
++  ifeq ($(OPENJDK_TARGET_OS), android)
++    # Bionic keeps pthread and the realtime functions inside libc, and the NDK
++    # ships no libpthread.a or librt.a to link against - both are absent from
++    # the sysroot. The linux variants taken above name them, so they are
++    # dropped here rather than in each of the twenty-three places that set
++    # them, for the same reason the variant mapping exists at all.
++    $1_EXTRA_LIBS := $$(filter-out -lpthread -lrt, $$($1_EXTRA_LIBS))
++  endif
  
    ifneq ($$($1_REAL_MAPFILE), )
      $1_EXTRA_LDFLAGS += $(call SET_SHARED_LIBRARY_MAPFILE,$$($1_REAL_MAPFILE))

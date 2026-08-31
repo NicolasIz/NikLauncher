@@ -602,8 +602,11 @@ jobs:
         run: |
           set -euo pipefail
           sysroot=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/sysroot
-          for lib in libpthread.a librt.a libdl.so libdl.a; do
-            found=$(find "$sysroot" -name "$lib" 2>/dev/null | head -2)
+          # No pipe here: find piped into head trips pipefail when head closes
+          # the pipe early, which killed this step - and the whole run - before
+          # configure last time.
+          for lib in libpthread.a librt.a libdl.so libdl.a libm.so; do
+            found=$(find "$sysroot" -name "$lib" -print -quit 2>/dev/null || true)
             printf '%-14s %s\n' "$lib" "${found:-NOT FOUND}"
           done
 

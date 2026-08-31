@@ -174,6 +174,13 @@ checked to be variant lookups rather than paths before substituting.
 This is the same idea as `HOTSPOT_TARGET_OS`, which `platform.m4` maps onto
 linux for exactly the same reason.
 
+Taking the linux variants brings one thing that does not apply. `LIBS_linux`
+names `-lpthread`, and several sites name `-lrt`. Bionic keeps both inside
+libc, and the NDK ships no `libpthread.a` or `librt.a` at all - confirmed by
+looking in the sysroot rather than assumed. So both are filtered out of the
+resolved library list, in the same single place, rather than in each of the
+sites that name them.
+
 ## Three files the Mobile Project never needed
 
 `JvmMapfile.gmk`, `GensrcAdlc.gmk` and `JvmOverrideFiles.gmk` are not in
