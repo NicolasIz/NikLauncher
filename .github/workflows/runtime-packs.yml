@@ -464,6 +464,24 @@ jobs:
             echo "alignment ok"
           done
 
+      # The whole Zink integration rests on this symbol. LWJGL resolves GL
+      # functions by looking inside the loaded library for an address-getter,
+      # and since Mesa builds no desktop libGL for Android, eglGetProcAddress
+      # is the entire path - there is nothing to fall back to. Asserted here
+      # rather than discovered as a black screen on the device.
+      - name: Check libEGL exports the address-getter LWJGL needs
+        run: |
+          set -euo pipefail
+          nm=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm
+          if ! "$nm" -D --defined-only out/mesa/libEGL.so | grep -q ' eglGetProcAddress$'; then
+            echo "libEGL.so does not export eglGetProcAddress; LWJGL would have no" >&2
+            echo "way to resolve a single OpenGL function through this pack." >&2
+            exit 1
+          fi
+          echo "eglGetProcAddress: exported"
+
+          echo "EGL entry points exported: $("$nm" -D --defined-only out/mesa/libEGL.so | grep -c ' egl')"
+
       - name: Describe the component
         run: |
           set -euo pipefail
