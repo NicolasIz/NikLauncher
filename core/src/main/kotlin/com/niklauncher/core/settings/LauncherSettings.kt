@@ -28,16 +28,22 @@ data class LauncherSettings(
     /**
      * Where the runtime pack index is published.
      *
-     * Deliberately empty by default: which packs NikLauncher offers is a
-     * licensing decision, not something to hard-code.
+     * Still a setting rather than a constant, because which packs NikLauncher
+     * offers is a licensing and provenance decision - but it now has a default,
+     * since there is somewhere real to point it. The packs behind it are built
+     * from the upstream sources each component.json names, and contain nothing
+     * of Minecraft's.
      */
-    val runtimePackIndexUrl: String = "",
+    val runtimePackIndexUrl: String = DEFAULT_PACK_INDEX_URL,
 ) {
     val defaultPerformanceProfile: PerformanceProfile
         get() = PerformanceProfile.fromId(defaultPerformanceProfileId) ?: PerformanceProfile.BALANCED
 
     companion object {
         const val DEFAULT_PLAYER_NAME = "Player"
+
+        const val DEFAULT_PACK_INDEX_URL =
+            "https://github.com/NicolasIz/NikLauncher/releases/download/runtime-packs/runtime-packs.json"
 
         val DEFAULT = LauncherSettings()
     }
