@@ -77,11 +77,41 @@ SRC
   "$out/egl_chained.c" -o "$chain/libEGL.so" \
   -L "$chain" -l:libaa_mid.so -Wl,--no-as-needed
 
+# The compat directory, and the rule that its contents lose to the platform's
+# own. A stand-in "platform" library is put on the loader's search path, and a
+# different library with the same name is put in compat/ - so the rule can be
+# checked by which of the two actually ended up loaded, not merely by whether
+# preloading returned without complaint.
+mkdir -p "$chain/compat" "$out/fakeplatform"
+cat > "$out/platform_marker.c" <<'SRC'
+int nik_platform_marker(void) { return 1; }
+SRC
+cat > "$out/compat_marker.c" <<'SRC'
+int nik_compat_marker(void) { return 2; }
+SRC
+"$cc" -std=c11 -Wall -Wextra -Werror -O0 -fPIC -shared \
+  "$out/platform_marker.c" -Wl,-soname,libnik_shared.so \
+  -o "$out/fakeplatform/libnik_shared.so"
+# Same name as the platform's, different contents: this is the one that must
+# lose. In a real pack the file name and the soname are equal, which is what
+# the runtime-packs workflow asserts for every compatibility library.
+"$cc" -std=c11 -Wall -Wextra -Werror -O0 -fPIC -shared \
+  "$out/compat_marker.c" -Wl,-soname,libnik_shared.so \
+  -o "$chain/compat/libnik_shared.so"
+# No platform copy of this one, so it is the one that must be loaded.
+"$cc" -std=c11 -Wall -Wextra -Werror -O0 -fPIC -shared \
+  "$out/compat_marker.c" -Wl,-soname,libnik_absent.so \
+  -o "$chain/compat/libnik_absent.so"
+
 echo "Building the EGL resolver test"
 "$cc" "${flags[@]}" \
   "$root/app/src/test/cpp/test_nikegl_resolve.c" \
   "$root/app/src/main/cpp/glfw/nikegl_resolve.c" \
   -ldl -o "$out/test_nikegl_resolve"
 
-"$out/test_nikegl_resolve" "$out/libegl_complete.so" "$out/libegl_incomplete.so" \
+# The stand-in platform library is reachable by bare soname only because it is
+# on the search path the loader read at start-up - which is exactly the
+# position a real platform library is in on a device.
+LD_LIBRARY_PATH="$out/fakeplatform" \
+  "$out/test_nikegl_resolve" "$out/libegl_complete.so" "$out/libegl_incomplete.so" \
   "$chain/libEGL.so"

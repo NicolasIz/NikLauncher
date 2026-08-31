@@ -43,6 +43,23 @@ void nikegl_close(void *handle);
 int nikegl_preload_siblings(const char *path);
 
 /*
+ * Loads the compatibility libraries a pack carries in `compat/`, preferring
+ * the device's own. Returns how many of ours were loaded.
+ *
+ * A pack ships small implementations of the platform-internal libraries Mesa
+ * is linked against - libcutils, libhardware, libsync - because Android does
+ * not hand those to an app. But "does not hand those to an app" is not true
+ * of all of them on all devices: libsync is public on some. Where the device
+ * offers the library, the device's is the one that should win, so each name
+ * is tried as a bare soname first and ours is opened only when that fails.
+ *
+ * Shadowing a working platform library with our own smaller one would be the
+ * same mistake as shipping Mesa's no-op stubs, and this is what avoids it.
+ * Called before the siblings: Mesa's own libraries name these at load time.
+ */
+int nikegl_preload_compat(const char *path);
+
+/*
  * Fills slots[0..count) with the addresses of names[0..count).
  *
  * Returns -1 when every symbol resolved, otherwise the index of the first one

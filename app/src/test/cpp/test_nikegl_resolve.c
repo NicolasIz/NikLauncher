@@ -11,6 +11,7 @@
 
 #include "../../main/cpp/glfw/nikegl_resolve.h"
 
+#include <dlfcn.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -133,6 +134,56 @@ static void test_preload_of_a_bare_name(void) {
           "a directory that is not there loads nothing");
 }
 
+/*
+ * The compat directory, and the rule that decides whether its contents are
+ * used at all.
+ *
+ * A pack ships small implementations of the platform-internal libraries Mesa
+ * needs, and must not shadow the device's where the device has one. The test
+ * builds two: one whose soname the loader can already find (standing in for a
+ * library the platform provides) and one it cannot. Only the second may be
+ * loaded, and "loaded" is checked by the count rather than by whether the
+ * whole thing succeeded - a rule that loaded both would pass a bare success
+ * check just as happily.
+ */
+static void test_compat_prefers_the_platform(const char *chained_egl) {
+    printf("compatibility libraries\n");
+
+    int loaded = nikegl_preload_compat(chained_egl);
+    check(loaded == 1, "loads only the one the platform does not provide");
+
+    /*
+     * Which one won, not just how many. Both libraries carry the same soname
+     * and different symbols, so the marker present in the loaded copy names
+     * the winner outright.
+     */
+    void *shared = dlopen("libnik_shared.so", RTLD_NOW | RTLD_LOCAL);
+    check(shared != NULL, "the shared name resolves to something");
+    if (shared != NULL) {
+        check(dlsym(shared, "nik_platform_marker") != NULL,
+              "the device's own is what got loaded");
+        check(dlsym(shared, "nik_compat_marker") == NULL,
+              "and the pack's copy did not shadow it");
+        dlclose(shared);
+    }
+
+    void *absent = dlopen("libnik_absent.so", RTLD_NOW | RTLD_LOCAL);
+    check(absent != NULL, "the one with no platform copy is in the namespace");
+    if (absent != NULL) {
+        check(dlsym(absent, "nik_compat_marker") != NULL,
+              "and it is the pack's, which is the only one there is");
+        dlclose(absent);
+    }
+}
+
+static void test_compat_without_a_directory(const char *plain_egl) {
+    printf("a pack with no compatibility directory\n");
+    check(nikegl_preload_compat(plain_egl) == 0,
+          "loads nothing, and is not an error: older packs carry none");
+    check(nikegl_preload_compat("libEGL.so") == 0, "a bare soname has no pack");
+    check(nikegl_preload_compat(NULL) == 0, "NULL is not a crash");
+}
+
 int main(int argc, char **argv) {
     if (argc < 4) {
         printf("usage: %s <complete.so> <incomplete.so> <chained-egl.so>\n", argv[0]);
@@ -142,6 +193,8 @@ int main(int argc, char **argv) {
     test_resolves_all(argv[1]);
     test_reports_the_missing_one(argv[2]);
     test_absent_library();
+    test_compat_prefers_the_platform(argv[3]);
+    test_compat_without_a_directory(argv[1]);
     test_preloads_a_chain(argv[3]);
     test_preload_of_a_bare_name();
 

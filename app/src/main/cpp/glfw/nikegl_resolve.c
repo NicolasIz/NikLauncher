@@ -80,9 +80,63 @@ const char *nikegl_last_error(void) {
 #define MAX_NAME 128
 #define MAX_PASSES 8
 
+/* Where a pack keeps the libraries it only supplies when the device does not. */
+static const char *const COMPAT_SUBDIRECTORY = "compat";
+
 static int ends_with_so(const char *name) {
     size_t length = strlen(name);
     return length > 3 && strcmp(name + length - 3, ".so") == 0;
+}
+
+/*
+ * Copies the directory part of `path` into `directory`. Returns 0 for a bare
+ * soname, which has no directory and needs none.
+ */
+static int directory_of(const char *path, char *directory, size_t size) {
+    if (path == NULL) return 0;
+    const char *slash = strrchr(path, '/');
+    if (slash == NULL) return 0;
+
+    size_t length = (size_t) (slash - path);
+    if (length == 0 || length >= size) return 0;
+    memcpy(directory, path, length);
+    directory[length] = '\0';
+    return 1;
+}
+
+int nikegl_preload_compat(const char *path) {
+    char directory[MAX_NAME];
+    if (!directory_of(path, directory, sizeof(directory))) return 0;
+
+    char compat[MAX_NAME * 2];
+    int written = snprintf(compat, sizeof(compat), "%s/%s", directory, COMPAT_SUBDIRECTORY);
+    if (written < 0 || (size_t) written >= sizeof(compat)) return 0;
+
+    DIR *dir = opendir(compat);
+    /* A pack without a compat directory is not an error; older packs have none. */
+    if (dir == NULL) return 0;
+
+    int loaded = 0;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (!ends_with_so(entry->d_name)) continue;
+        if (strlen(entry->d_name) >= MAX_NAME) continue;
+
+        /*
+         * The device's own first. A successful open by bare soname means the
+         * platform provides this library and ours must not shadow it - the
+         * real one knows things ours never will.
+         */
+        if (dlopen(entry->d_name, RTLD_NOW | RTLD_LOCAL) != NULL) continue;
+
+        char full[MAX_NAME * 3];
+        written = snprintf(full, sizeof(full), "%s/%s", compat, entry->d_name);
+        if (written < 0 || (size_t) written >= sizeof(full)) continue;
+
+        if (dlopen(full, RTLD_NOW | RTLD_LOCAL) != NULL) loaded++;
+    }
+    closedir(dir);
+    return loaded;
 }
 
 int nikegl_preload_siblings(const char *path) {

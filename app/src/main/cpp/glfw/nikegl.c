@@ -57,11 +57,16 @@ int nikegl_load(const char *path) {
     /*
      * Before the open, not after. A pack's libEGL names libraries that sit
      * beside it in a directory the loader does not search, so opening it
-     * cold fails on the first DT_NEEDED it cannot find. Loading the siblings
-     * first puts them in the namespace under their sonames, which is where
-     * the loader looks before it searches any path. Costs nothing for the
-     * platform's own libEGL, which is named rather than pathed.
+     * cold fails on the first DT_NEEDED it cannot find. Loading them first
+     * puts them in the namespace under their sonames, which is where the
+     * loader looks before it searches any path.
+     *
+     * Compat before siblings, because Mesa's own libraries name libcutils and
+     * libsync at load time and would otherwise fail before we got to them.
+     * Both cost nothing for the platform's own libEGL, which is named rather
+     * than pathed.
      */
+    nikegl_preload_compat(name);
     nikegl_preload_siblings(name);
 
     void *handle = nikegl_open(name);

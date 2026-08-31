@@ -415,6 +415,91 @@ jobs:
           meson compile -C upstream-drm/build-android
           meson install -C upstream-drm/build-android
 
+      # The three libraries Mesa is linked against that Android will not hand
+      # an app: libcutils, libhardware and libsync. Mesa's own stand-ins under
+      # src/android_stub are no-ops that return success without doing anything
+      # - hw_get_module reports a module it never sets, and Mesa's fallback
+      # gralloc dereferences it on the next line - so these are ours instead,
+      # written against public NDK APIs. tools/android-compat/README.md has
+      # the symbol-by-symbol account.
+      #
+      # The soname is what matters: it has to be exactly the name in Mesa's
+      # DT_NEEDED, or the loader goes looking for a library nobody provides.
+      - name: Build the Android compatibility libraries
+        run: |
+          set -euo pipefail
+          tc=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin
+          cc=$tc/aarch64-linux-android${ANDROID_API}-clang
+          mkdir -p out/compat
+
+          build() {
+            local name=$1 source=$2; shift 2
+            # Default visibility: the whole point of these libraries is the
+            # handful of symbols they export, and there is nothing else in
+            # them to hide.
+            "$cc" -std=c11 -Wall -Wextra -Werror -O2 -fPIC -shared \
+              "tools/android-compat/$source" \
+              -Wl,-soname,"$name" -Wl,-z,max-page-size=16384 \
+              "$@" -o "out/compat/$name"
+            echo "built $name"
+          }
+
+          # -landroid for ATrace, which is where the real tracing calls go.
+          build libcutils.so   cutils_compat.c   -landroid
+          build libhardware.so hardware_compat.c
+          build libsync.so     sync_compat.c
+
+      # Checked rather than assumed, because a wrong soname or a missing
+      # symbol here does not fail the build - it fails the first dlopen on a
+      # phone, with a message about a library that looks like it is present.
+      - name: Check the compatibility libraries are what Mesa will ask for
+        run: |
+          set -euo pipefail
+          readelf=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf
+          nm=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm
+
+          expect() {
+            local lib=$1; shift
+            echo "--- $lib"
+            local soname
+            soname=$("$readelf" -dW "out/compat/$lib" | sed -n 's/.*(SONAME).*\[\(.*\)\]/\1/p')
+            if [ "$soname" != "$lib" ]; then
+              echo "soname is '$soname', but Mesa's DT_NEEDED says '$lib'" >&2
+              exit 1
+            fi
+            echo "    soname: $soname"
+            for symbol in "$@"; do
+              if ! "$nm" -D --defined-only "out/compat/$lib" | grep -q " $symbol\$"; then
+                echo "$lib does not define $symbol" >&2
+                exit 1
+              fi
+            done
+            echo "    defines: $*"
+            "$readelf" -h "out/compat/$lib" | grep -E "Machine|Class" | sed 's/^/    /'
+            for align in $("$readelf" -l "out/compat/$lib" | awk '/LOAD/ {print $NF}'); do
+              if [ "$((align))" -lt 16384 ]; then
+                echo "PT_LOAD alignment $align is below 16 KB in $lib" >&2
+                exit 1
+              fi
+            done
+            echo "    alignment ok"
+          }
+
+          # Exactly the symbols the probe read out of Mesa's own stand-ins,
+          # which is the set Mesa links against and therefore the set that
+          # has to be here.
+          expect libcutils.so property_get atrace_begin_body atrace_end_body \
+            atrace_init atrace_get_enabled_tags
+          expect libhardware.so hw_get_module
+          expect libsync.so sync_wait sync_merge sync_file_info sync_file_info_free
+
+          # Nothing here may pull in a library an app cannot open either.
+          echo "--- what they need"
+          for lib in out/compat/*.so; do
+            echo "    $lib: $("$readelf" -dW "$lib" \
+              | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | tr '\n' ' ')"
+          done
+
       - name: Fetch Mesa
         run: |
           set -euo pipefail
@@ -474,6 +559,14 @@ jobs:
             -not -path '*/android_stub/*' \
             -exec cp -v {} out/mesa/ \;
           cp -v "$GITHUB_WORKSPACE/android-deps/lib/libdrm.so" out/mesa/ 2>/dev/null || true
+
+          # In a subdirectory of their own, not beside Mesa's libraries. The
+          # bridge loads these only when the device does not offer the library
+          # itself - libsync is public on some devices - and it can only make
+          # that distinction if it can tell our copies apart from the pack's
+          # ordinary contents.
+          mkdir -p out/mesa/compat
+          cp -v out/compat/*.so out/mesa/compat/
 
           if [ -z "$(ls -A out/mesa)" ]; then
             echo "Mesa produced no shared objects" >&2
@@ -911,6 +1004,91 @@ jobs:
           meson install -C upstream-drm/build-android > /dev/null
           ls "$GITHUB_WORKSPACE/android-deps/lib"
 
+      # The three libraries Mesa is linked against that Android will not hand
+      # an app: libcutils, libhardware and libsync. Mesa's own stand-ins under
+      # src/android_stub are no-ops that return success without doing anything
+      # - hw_get_module reports a module it never sets, and Mesa's fallback
+      # gralloc dereferences it on the next line - so these are ours instead,
+      # written against public NDK APIs. tools/android-compat/README.md has
+      # the symbol-by-symbol account.
+      #
+      # The soname is what matters: it has to be exactly the name in Mesa's
+      # DT_NEEDED, or the loader goes looking for a library nobody provides.
+      - name: Build the Android compatibility libraries
+        run: |
+          set -euo pipefail
+          tc=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin
+          cc=$tc/aarch64-linux-android${ANDROID_API}-clang
+          mkdir -p out/compat
+
+          build() {
+            local name=$1 source=$2; shift 2
+            # Default visibility: the whole point of these libraries is the
+            # handful of symbols they export, and there is nothing else in
+            # them to hide.
+            "$cc" -std=c11 -Wall -Wextra -Werror -O2 -fPIC -shared \
+              "tools/android-compat/$source" \
+              -Wl,-soname,"$name" -Wl,-z,max-page-size=16384 \
+              "$@" -o "out/compat/$name"
+            echo "built $name"
+          }
+
+          # -landroid for ATrace, which is where the real tracing calls go.
+          build libcutils.so   cutils_compat.c   -landroid
+          build libhardware.so hardware_compat.c
+          build libsync.so     sync_compat.c
+
+      # Checked rather than assumed, because a wrong soname or a missing
+      # symbol here does not fail the build - it fails the first dlopen on a
+      # phone, with a message about a library that looks like it is present.
+      - name: Check the compatibility libraries are what Mesa will ask for
+        run: |
+          set -euo pipefail
+          readelf=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf
+          nm=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm
+
+          expect() {
+            local lib=$1; shift
+            echo "--- $lib"
+            local soname
+            soname=$("$readelf" -dW "out/compat/$lib" | sed -n 's/.*(SONAME).*\[\(.*\)\]/\1/p')
+            if [ "$soname" != "$lib" ]; then
+              echo "soname is '$soname', but Mesa's DT_NEEDED says '$lib'" >&2
+              exit 1
+            fi
+            echo "    soname: $soname"
+            for symbol in "$@"; do
+              if ! "$nm" -D --defined-only "out/compat/$lib" | grep -q " $symbol\$"; then
+                echo "$lib does not define $symbol" >&2
+                exit 1
+              fi
+            done
+            echo "    defines: $*"
+            "$readelf" -h "out/compat/$lib" | grep -E "Machine|Class" | sed 's/^/    /'
+            for align in $("$readelf" -l "out/compat/$lib" | awk '/LOAD/ {print $NF}'); do
+              if [ "$((align))" -lt 16384 ]; then
+                echo "PT_LOAD alignment $align is below 16 KB in $lib" >&2
+                exit 1
+              fi
+            done
+            echo "    alignment ok"
+          }
+
+          # Exactly the symbols the probe read out of Mesa's own stand-ins,
+          # which is the set Mesa links against and therefore the set that
+          # has to be here.
+          expect libcutils.so property_get atrace_begin_body atrace_end_body \
+            atrace_init atrace_get_enabled_tags
+          expect libhardware.so hw_get_module
+          expect libsync.so sync_wait sync_merge sync_file_info sync_file_info_free
+
+          # Nothing here may pull in a library an app cannot open either.
+          echo "--- what they need"
+          for lib in out/compat/*.so; do
+            echo "    $lib: $("$readelf" -dW "$lib" \
+              | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | tr '\n' ' ')"
+          done
+
       - name: Fetch Mesa
         run: |
           set -euo pipefail
@@ -1205,6 +1383,12 @@ jobs:
           require bin/java
           require nikgraphics/zink/libEGL.so
           require nikgraphics/zink/liblwjgl.so
+          # The three Android will not hand an app. Without them Mesa's libEGL
+          # does not open at all, so a pack missing them advertises a backend
+          # that cannot start - which is the state this pack was in before.
+          require nikgraphics/zink/compat/libcutils.so
+          require nikgraphics/zink/compat/libhardware.so
+          require nikgraphics/zink/compat/libsync.so
           require nikgraphics/gl4es/libGL.so
           require nikgraphics/gl4es/liblwjgl.so
           [ "$fail" -eq 0 ] || exit 1
@@ -1291,7 +1475,7 @@ jobs:
                 "size": ${{ steps.package.outputs.size }},
                 "libjvmPath": "lib/server/libjvm.so",
                 "providedClasspath": [],
-                "graphicsBackendIds": ["gl4es"],
+                "graphicsBackendIds": ["gl4es", "zink"],
                 "graphicsDirectory": "nikgraphics",
                 "maxPageSizeBytes": 16384
               }
