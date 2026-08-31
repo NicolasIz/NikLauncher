@@ -308,6 +308,14 @@ jobs:
   # replacing a vendor driver with Mesa's would trade something that works for
   # something worse. Zink is the only gallium driver enabled.
   #
+  # android-strict is off. Mesa describes it as strict Android compliance,
+  # where disabling "may cause CTS failures or other problems, but allows
+  # drivers to expose capabilities that are normally hidden". Those hidden
+  # capabilities are the desktop GL features Minecraft asks for, and CTS
+  # compliance is a requirement for a system graphics driver - which this is
+  # not. It is a library an app loads for itself, so nothing here is submitted
+  # for certification.
+  #
   # Every option below was validated by a configure-only probe before this job
   # was written to compile anything, because Mesa is a long build and finding a
   # typo after fifteen minutes is an expensive way to learn.
@@ -400,6 +408,7 @@ jobs:
             --buildtype release \
             -Dplatforms=android \
             -Dandroid-stub=true \
+            -Dandroid-strict=false \
             -Dplatform-sdk-version=${ANDROID_API} \
             -Dgallium-drivers=zink \
             -Dvulkan-drivers= \
@@ -459,6 +468,7 @@ jobs:
             "license": "MIT",
             "bundles": ["libdrm ${LIBDRM_REF} (MIT)"],
             "requiresVulkan": true,
+            "androidStrict": false,
             "abi": "${ANDROID_ABI}",
             "minSdk": ${ANDROID_API},
             "maxPageSizeBytes": 16384
