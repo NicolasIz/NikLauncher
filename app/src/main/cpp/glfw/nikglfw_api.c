@@ -13,6 +13,7 @@
  */
 
 #include "nikglfw_core.h"
+#include "nikegl.h"
 
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
@@ -20,6 +21,7 @@
 #include <android/native_window.h>
 #include <pthread.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -178,14 +180,36 @@ NIK_EXPORT void glfwDefaultWindowHints(void) {}
 NIK_EXPORT void glfwWindowHint(int hint, int value) { (void) hint; (void) value; }
 NIK_EXPORT void glfwWindowHintString(int hint, const char *value) { (void) hint; (void) value; }
 
+/*
+ * Which libEGL to resolve against. Empty means the platform's own, which is
+ * what gl4es and LTW want; the Zink backend points this at the libEGL inside
+ * the Mesa runtime pack.
+ */
+static char g_egl_library[512];
+
+void nikglfw_set_egl_library(const char *path) {
+    pthread_mutex_lock(&g_lock);
+    if (path == NULL) {
+        g_egl_library[0] = '\0';
+    } else {
+        snprintf(g_egl_library, sizeof(g_egl_library), "%s", path);
+    }
+    pthread_mutex_unlock(&g_lock);
+}
+
 static bool create_egl_context(void) {
-    g_display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+    if (nikegl_load(g_egl_library) != 0) {
+        LOGE("no usable EGL: %s", nikegl_error());
+        return false;
+    }
+
+    g_display = nikegl.GetDisplay(EGL_DEFAULT_DISPLAY);
     if (g_display == EGL_NO_DISPLAY) {
         LOGE("eglGetDisplay failed");
         return false;
     }
-    if (!eglInitialize(g_display, NULL, NULL)) {
-        LOGE("eglInitialize failed: 0x%x", eglGetError());
+    if (!nikegl.Initialize(g_display, NULL, NULL)) {
+        LOGE("eglInitialize failed: 0x%x", nikegl.GetError());
         return false;
     }
 
@@ -204,9 +228,9 @@ static bool create_egl_context(void) {
     };
 
     EGLint config_count = 0;
-    if (!eglChooseConfig(g_display, config_attributes, &g_config, 1, &config_count) ||
+    if (!nikegl.ChooseConfig(g_display, config_attributes, &g_config, 1, &config_count) ||
         config_count == 0) {
-        LOGE("no EGL config with a 24 bit depth buffer: 0x%x", eglGetError());
+        LOGE("no EGL config with a 24 bit depth buffer: 0x%x", nikegl.GetError());
         return false;
     }
 
@@ -215,16 +239,16 @@ static bool create_egl_context(void) {
         return false;
     }
 
-    g_surface = eglCreateWindowSurface(g_display, g_config, g_native_window, NULL);
+    g_surface = nikegl.CreateWindowSurface(g_display, g_config, g_native_window, NULL);
     if (g_surface == EGL_NO_SURFACE) {
-        LOGE("eglCreateWindowSurface failed: 0x%x", eglGetError());
+        LOGE("eglCreateWindowSurface failed: 0x%x", nikegl.GetError());
         return false;
     }
 
     const EGLint context_attributes[] = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
-    g_context = eglCreateContext(g_display, g_config, EGL_NO_CONTEXT, context_attributes);
+    g_context = nikegl.CreateContext(g_display, g_config, EGL_NO_CONTEXT, context_attributes);
     if (g_context == EGL_NO_CONTEXT) {
-        LOGE("eglCreateContext failed: 0x%x", eglGetError());
+        LOGE("eglCreateContext failed: 0x%x", nikegl.GetError());
         return false;
     }
 
@@ -251,9 +275,9 @@ NIK_EXPORT void glfwDestroyWindow(GLFWwindow *window) {
     (void) window;
     pthread_mutex_lock(&g_lock);
     if (g_display != EGL_NO_DISPLAY) {
-        eglMakeCurrent(g_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-        if (g_context != EGL_NO_CONTEXT) eglDestroyContext(g_display, g_context);
-        if (g_surface != EGL_NO_SURFACE) eglDestroySurface(g_display, g_surface);
+        nikegl.MakeCurrent(g_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        if (g_context != EGL_NO_CONTEXT) nikegl.DestroyContext(g_display, g_context);
+        if (g_surface != EGL_NO_SURFACE) nikegl.DestroySurface(g_display, g_surface);
         g_context = EGL_NO_CONTEXT;
         g_surface = EGL_NO_SURFACE;
     }
@@ -262,28 +286,28 @@ NIK_EXPORT void glfwDestroyWindow(GLFWwindow *window) {
 
 NIK_EXPORT void glfwMakeContextCurrent(GLFWwindow *window) {
     if (window == NULL) {
-        eglMakeCurrent(g_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        nikegl.MakeCurrent(g_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         return;
     }
-    if (!eglMakeCurrent(g_display, g_surface, g_surface, g_context)) {
-        LOGE("eglMakeCurrent failed: 0x%x", eglGetError());
+    if (!nikegl.MakeCurrent(g_display, g_surface, g_surface, g_context)) {
+        LOGE("eglMakeCurrent failed: 0x%x", nikegl.GetError());
     }
 }
 
 NIK_EXPORT GLFWwindow *glfwGetCurrentContext(void) {
-    return eglGetCurrentContext() == EGL_NO_CONTEXT ? NULL : NIK_WINDOW;
+    return nikegl.GetCurrentContext() == EGL_NO_CONTEXT ? NULL : NIK_WINDOW;
 }
 
 NIK_EXPORT void glfwSwapBuffers(GLFWwindow *window) {
     (void) window;
     if (g_display != EGL_NO_DISPLAY && g_surface != EGL_NO_SURFACE) {
-        eglSwapBuffers(g_display, g_surface);
+        nikegl.SwapBuffers(g_display, g_surface);
     }
 }
 
 NIK_EXPORT void glfwSwapInterval(int interval) {
     if (g_display != EGL_NO_DISPLAY) {
-        eglSwapInterval(g_display, interval);
+        nikegl.SwapInterval(g_display, interval);
     }
 }
 
@@ -693,11 +717,18 @@ NIK_EXPORT uint64_t glfwGetTimerFrequency(void) { return 1000000000ULL; }
 /* --- Context ------------------------------------------------------------ */
 
 NIK_EXPORT void *glfwGetProcAddress(const char *name) {
-    return (void *) eglGetProcAddress(name);
+    return (void *) nikegl.GetProcAddress(name);
 }
 
 NIK_EXPORT int glfwExtensionSupported(const char *extension) {
-    const char *extensions = (const char *) glGetString(GL_EXTENSIONS);
+    /* Resolved rather than linked, for the same reason the egl* calls are.
+     * Note this is the GLES spelling: on a desktop core profile glGetString
+     * returns NULL for GL_EXTENSIONS and glGetStringi is required. Minecraft
+     * does not call glfwExtensionSupported, so that is left as it was. */
+    typedef const unsigned char *(*NikGlGetString)(unsigned int);
+    NikGlGetString get_string = (NikGlGetString) nikegl.GetProcAddress("glGetString");
+    if (get_string == NULL) return 0;
+    const char *extensions = (const char *) get_string(GL_EXTENSIONS);
     return (extensions != NULL && strstr(extensions, extension) != NULL) ? 1 : 0;
 }
 

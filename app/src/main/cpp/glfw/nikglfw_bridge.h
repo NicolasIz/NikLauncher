@@ -25,4 +25,13 @@ pthread_mutex_t *nikglfw_lock(void);
  */
 void nikglfw_set_native_window(ANativeWindow *window);
 
+/*
+ * Names the libEGL to resolve against, or NULL for the platform's own.
+ *
+ * Zink brings its own inside the Mesa runtime pack, and it has to be named
+ * before the game creates its window: after that the table is already bound
+ * and a second call would be ignored.
+ */
+void nikglfw_set_egl_library(const char *path);
+
 #endif /* NIKGLFW_BRIDGE_H */

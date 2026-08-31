@@ -38,11 +38,22 @@ add_library(glfw SHARED
     glfw/nikglfw_core.c
     glfw/nikglfw_api.c
     glfw/nikglfw_jni.c
+    glfw/nikegl.c
+    glfw/nikegl_resolve.c
 )
 
 target_link_options(glfw PRIVATE "-Wl,-z,max-page-size=16384")
 
-find_library(egl-lib EGL)
-find_library(gles-lib GLESv2)
+# Deliberately NOT linked against EGL or GLESv2, though it still compiles
+# against their headers for the types and the Khronos constants.
+#
+# A DT_NEEDED on the system libEGL would have the loader bind every egl* call
+# to the device's driver before Mesa's copy was ever opened, which would make
+# the Zink backend impossible: its whole point is a different EGL. So the
+# entry points are resolved by hand in nikegl.c, from whichever library the
+# launcher names, and glGetString - the one GL symbol this code called
+# directly - now comes through eglGetProcAddress.
+#
+# libandroid stays: ANativeWindow is the platform's, not the pack's.
 find_library(android-lib android)
-target_link_libraries(glfw ${egl-lib} ${gles-lib} ${android-lib} ${log-lib})
+target_link_libraries(glfw ${android-lib} ${log-lib})

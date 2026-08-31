@@ -26,6 +26,7 @@ object GlfwBridge {
     val unavailableReason: String? get() = loadError?.message
 
     private external fun nativeSetSurface(surface: Surface?)
+    private external fun nativeSetEglLibrary(path: String?)
     private external fun nativePushKey(key: Int, scancode: Int, action: Int, mods: Int)
     private external fun nativePushChar(codepoint: Int, mods: Int)
     private external fun nativePushMouseButton(button: Int, action: Int, mods: Int)
@@ -44,6 +45,22 @@ object GlfwBridge {
      */
     fun attachSurface(surface: Surface?) {
         if (isAvailable) nativeSetSurface(surface)
+    }
+
+    /**
+     * Names the `libEGL.so` the bridge should resolve its EGL calls against, or
+     * null for the device's own.
+     *
+     * Zink is desktop GL over Vulkan and ships its own EGL inside the Mesa
+     * runtime pack; without this the bridge would bind to the system driver and
+     * the pack would never be used. gl4es and LTW want the system one, so they
+     * pass null.
+     *
+     * Must be called before Minecraft creates its window - after that the table
+     * is bound and this is ignored.
+     */
+    fun useEglLibrary(path: String?) {
+        if (isAvailable) nativeSetEglLibrary(path)
     }
 
     fun send(event: InputEvent) {

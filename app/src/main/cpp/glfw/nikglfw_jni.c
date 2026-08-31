@@ -33,6 +33,21 @@ Java_com_niklauncher_app_runtime_GlfwBridge_nativeSetSurface(
 }
 
 JNIEXPORT void JNICALL
+Java_com_niklauncher_app_runtime_GlfwBridge_nativeSetEglLibrary(
+        JNIEnv *env, jobject thiz, jstring path) {
+    (void) thiz;
+    if (path == NULL) {
+        nikglfw_set_egl_library(NULL);
+        return;
+    }
+    const char *chars = (*env)->GetStringUTFChars(env, path, NULL);
+    nikglfw_set_egl_library(chars);
+    if (chars != NULL) {
+        (*env)->ReleaseStringUTFChars(env, path, chars);
+    }
+}
+
+JNIEXPORT void JNICALL
 Java_com_niklauncher_app_runtime_GlfwBridge_nativePushKey(
         JNIEnv *env, jobject thiz, jint key, jint scancode, jint action, jint mods) {
     (void) env;
