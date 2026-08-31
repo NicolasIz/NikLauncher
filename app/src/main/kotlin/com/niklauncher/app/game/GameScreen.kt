@@ -19,6 +19,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.niklauncher.app.input.ControlOverlay
+import com.niklauncher.core.control.ControlButton
+import com.niklauncher.core.control.ControlJoystick
+import com.niklauncher.core.control.ControlLayout
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -32,10 +36,18 @@ import kotlinx.coroutines.flow.StateFlow
 @Composable
 fun GameScreen(
     state: StateFlow<GameState>,
+    controls: StateFlow<ControlLayout>,
+    inMenu: StateFlow<Boolean>,
     onSurface: (SurfaceView) -> Unit,
+    onButtonPressed: (ControlButton) -> Unit,
+    onButtonReleased: (ControlButton) -> Unit,
+    onJoystickMoved: (ControlJoystick, Float, Float) -> Unit,
+    onJoystickReleased: (ControlJoystick) -> Unit,
     onExit: () -> Unit,
 ) {
     val current by state.collectAsState()
+    val layout by controls.collectAsState()
+    val menu by inMenu.collectAsState()
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(
@@ -48,11 +60,16 @@ fun GameScreen(
 
             is GameState.Ready -> Message(value.summary + "\n\nEsperando a la superficie…")
 
-            // Nothing overlaid once the game owns the screen. The on-screen
-            // controls are not fed into a session yet: the translation layer
-            // and the overlay both exist and are tested, but nothing joins
-            // them to this surface, so touch does nothing in game so far.
-            is GameState.Running -> Unit
+            // Drawn only while the game is running: a control that reaches the
+            // bridge before the window exists would be queued against nothing.
+            is GameState.Running -> ControlOverlay(
+                layout = layout,
+                inMenu = menu,
+                onButtonPressed = onButtonPressed,
+                onButtonReleased = onButtonReleased,
+                onJoystickMoved = onJoystickMoved,
+                onJoystickReleased = onJoystickReleased,
+            )
 
             is GameState.Failed -> Failure(value.reason, onExit)
         }

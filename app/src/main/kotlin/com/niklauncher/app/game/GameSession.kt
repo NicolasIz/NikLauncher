@@ -4,6 +4,11 @@ import android.util.Log
 import com.niklauncher.app.data.AppContainer
 import com.niklauncher.app.runtime.GlfwBridge
 import com.niklauncher.app.runtime.JvmBridge
+import com.niklauncher.core.control.ControlButton
+import com.niklauncher.core.control.ControlInputTranslator
+import com.niklauncher.core.control.ControlJoystick
+import com.niklauncher.core.control.ControlLayout
+import com.niklauncher.core.control.ControlPresets
 import com.niklauncher.core.install.InstallPlan
 import com.niklauncher.core.install.InstallPlanner
 import com.niklauncher.core.instance.Instance
@@ -46,10 +51,45 @@ class GameSession(
     private val _state = MutableStateFlow<GameState>(GameState.Preparing)
     val state: StateFlow<GameState> = _state.asStateFlow()
 
+    private val _controls = MutableStateFlow(ControlPresets.all().first())
+    val controls: StateFlow<ControlLayout> = _controls.asStateFlow()
+
+    private val _inMenu = MutableStateFlow(false)
+    val inMenu: StateFlow<Boolean> = _inMenu.asStateFlow()
+
+    private val input = ControlInputTranslator(_controls.value)
+
     private var planned: PlannedLaunch? = null
     private var runtime: InstalledRuntime? = null
     private var display = DisplaySize(1280, 720)
     private var started = false
+
+    fun onButtonPressed(button: ControlButton) = dispatch(input.press(button))
+
+    fun onButtonReleased(button: ControlButton) = dispatch(input.release(button))
+
+    fun onJoystickMoved(joystick: ControlJoystick, dx: Float, dy: Float) =
+        dispatch(input.moveJoystick(joystick, dx, dy))
+
+    fun onJoystickReleased(joystick: ControlJoystick) = dispatch(input.releaseJoystick(joystick))
+
+    /** Focus loss: let go of everything rather than walk into a wall. */
+    fun onFocusLost() = dispatch(input.releaseAll())
+
+    private fun dispatch(output: ControlInputTranslator.Output) {
+        GlfwBridge.send(output.events)
+        _inMenu.value = input.inMenu
+        output.sideEffects.forEach { effect ->
+            when (effect) {
+                // Counted rather than flagged, so a second request is visible
+                // as a change even though the answer is the same each time.
+                ControlInputTranslator.SideEffect.TOGGLE_KEYBOARD -> _keyboardRequests.value++
+            }
+        }
+    }
+
+    private val _keyboardRequests = MutableStateFlow(0)
+    val keyboardRequests: StateFlow<Int> = _keyboardRequests.asStateFlow()
 
     fun onSurfaceSize(width: Int, height: Int) {
         if (width > 0 && height > 0) display = DisplaySize(width, height)
@@ -102,6 +142,12 @@ class GameSession(
             account = LaunchAccount.offline(container.settings.settings.first().playerName),
             display = display,
         )
+
+        val layout = container.controlLayouts.load()
+            .firstOrNull { it.id == container.settings.settings.first().activeControlLayoutId }
+            ?: ControlPresets.all().first()
+        _controls.value = layout
+        input.useLayout(layout)
 
         runtime = installed
         planned = plan

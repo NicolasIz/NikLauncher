@@ -53,7 +53,13 @@ class GameActivity : ComponentActivity() {
         setContent {
             GameScreen(
                 state = session.state,
+                controls = session.controls,
+                inMenu = session.inMenu,
                 onSurface = ::attachSurface,
+                onButtonPressed = session::onButtonPressed,
+                onButtonReleased = session::onButtonReleased,
+                onJoystickMoved = session::onJoystickMoved,
+                onJoystickReleased = session::onJoystickReleased,
                 onExit = { finish() },
             )
         }
@@ -86,8 +92,10 @@ class GameActivity : ComponentActivity() {
 
     override fun onPause() {
         super.onPause()
-        // Releasing what is held stops the game from walking into a wall while
-        // the player is in another app.
+        // Both halves matter: the bridge drops the keys the game thinks are
+        // down, and the translator forgets what the overlay thinks is held -
+        // including latched toggles, which would otherwise come back sneaking.
+        session.onFocusLost()
         GlfwBridge.setFocused(false)
     }
 
