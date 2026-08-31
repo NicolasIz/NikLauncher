@@ -37,7 +37,13 @@ stability first, so the support is ported back to 21u instead.
 | `flags-other.m4` | Same target triple for the assembler |
 | `toolchain.m4` | Skip the build-compiler version probe the NDK clang fails |
 | `lib-freetype.m4` | Use the bundled freetype; there is no system one |
-| `libraries.m4` | No X11, and no CUPS - Android has no printing system |
+| `libraries.m4` | No X11, no fontconfig, no CUPS |
+
+`libraries.m4` decides six dependencies in one block. Android needs three
+turned off - X11, fontconfig and CUPS - and the other three already fall out
+correctly: freetype is satisfied by the bundled copy the `lib-freetype.m4` hunk
+selects, ALSA is gated on the target being exactly `xlinux` so android misses
+it, and FFI is only wanted for the `zero` JVM variant.
 | `Modules.gmk`, `JdkNativeCompilation.gmk` | Take Java and native sources from the `linux` tree |
 | `JvmFlags.gmk` | Put the linux and `linux_aarch64` include directories on the path |
 | `java.desktop/*.gmk` | No AWT, no sound |
