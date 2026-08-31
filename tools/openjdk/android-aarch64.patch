@@ -505,6 +505,36 @@ index a163b8648..906d36aae 100644
  }
  
  static unsigned count_newlines(const char* s) {
+diff --git a/src/hotspot/share/utilities/elfFile.hpp b/src/hotspot/share/utilities/elfFile.hpp
+index 579837ebf..7bd877da2 100644
+--- a/src/hotspot/share/utilities/elfFile.hpp
++++ b/src/hotspot/share/utilities/elfFile.hpp
+@@ -46,7 +46,11 @@ typedef Elf64_Shdr      Elf_Shdr;
+ typedef Elf64_Phdr      Elf_Phdr;
+ typedef Elf64_Sym       Elf_Sym;
+ 
+-#if !defined(_ALLBSD_SOURCE) || defined(__APPLE__)
++// Only when the platform has not already spelled it. Bionic's <linux/elf.h>
++// defines ELF_ST_TYPE itself and defines ELF64_ST_TYPE in terms of it, so
++// redefining one as the other leaves the preprocessor chasing its own tail and
++// the identifier undeclared at the use site.
++#if (!defined(_ALLBSD_SOURCE) || defined(__APPLE__)) && !defined(ELF_ST_TYPE)
+ #define ELF_ST_TYPE ELF64_ST_TYPE
+ #endif
+ 
+@@ -62,7 +66,11 @@ typedef Elf32_Shdr      Elf_Shdr;
+ typedef Elf32_Phdr      Elf_Phdr;
+ typedef Elf32_Sym       Elf_Sym;
+ 
+-#if !defined(_ALLBSD_SOURCE) || defined(__APPLE__)
++// Only when the platform has not already spelled it. Bionic's <linux/elf.h>
++// defines ELF_ST_TYPE itself and defines ELF32_ST_TYPE in terms of it, so
++// redefining one as the other leaves the preprocessor chasing its own tail and
++// the identifier undeclared at the use site.
++#if (!defined(_ALLBSD_SOURCE) || defined(__APPLE__)) && !defined(ELF_ST_TYPE)
+ #define ELF_ST_TYPE ELF32_ST_TYPE
+ #endif
+ #endif
 diff --git a/src/java.base/unix/native/libnet/net_util_md.h b/src/java.base/unix/native/libnet/net_util_md.h
 index 902cf9673..cc7cb6f2a 100644
 --- a/src/java.base/unix/native/libnet/net_util_md.h

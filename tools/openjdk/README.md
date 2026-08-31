@@ -66,6 +66,7 @@ lives in `linux/native/libnio` and was not, because libraries are found through
 | `GensrcAdlc.gmk` | Give ADLC the linux OS defines |
 | `JvmOverrideFiles.gmk` | Large-file support and the clang PCH exclusions |
 | `net_util_md.h` | Bionic wants `netinet/in.h` ahead of `netdb.h` |
+| `elfFile.hpp` | Do not redefine `ELF_ST_TYPE` when the libc already defines it |
 | `os_linux.cpp` | Two Bionic gaps in diagnostic code paths |
 
 ## The JVM's OS defines are the linux ones, unchanged
@@ -76,9 +77,12 @@ marker, and it does not belong on a Linux kernel. It reaches sixteen places in
 HotSpot, and setting it here quietly did three wrong things:
 
 - `elfFile.hpp` guards `#define ELF_ST_TYPE ELF64_ST_TYPE` with
-  `!defined(_ALLBSD_SOURCE)`, so `ELF_ST_TYPE` went undefined and
-  `elfSymbolTable.cpp` stopped compiling. That was read as a Bionic gap and
-  patched with a hand-written macro. It was not a Bionic gap.
+  `!defined(_ALLBSD_SOURCE)`, so the define was suppressed and Bionic's own
+  `ELF_ST_TYPE` was used instead. That was read as a Bionic gap and patched
+  with a hand-written macro, which was dead code: it was guarded on
+  `!defined(ELF_ST_TYPE)`, and Bionic had already defined it. Removing
+  `_ALLBSD_SOURCE` let HotSpot's redefinition through and exposed a real
+  conflict, described below.
 - `os_posix.cpp` took the BSD `clock_tics_per_sec = CLK_TCK` branch instead of
   `sysconf(_SC_CLK_TCK)`. That too was patched around rather than traced.
 - `arguments.cpp` guards `UseLargePages` on `!defined(_ALLBSD_SOURCE)`, so it
@@ -153,11 +157,44 @@ os_linux.cpp:605: use of undeclared identifier '_CS_GNU_LIBC_VERSION'
 os_linux.cpp:1907: no member named 'dlinfo' in the global namespace
 ```
 
-A fourth error in that batch, `elfSymbolTable.cpp:50: use of undeclared
-identifier 'ELF_ST_TYPE'`, looked like a fifth Bionic gap and was patched as
-one. It was not: it was this patch's own `-D_ALLBSD_SOURCE`, and it is gone
-along with the define. Worth remembering when the next one of these appears -
-two of the four turned out to be self-inflicted.
+A fourth error in that batch was around `ELF_ST_TYPE`, and it was not a
+missing symbol at all - see below. Worth remembering when the next one of
+these appears: not every error from a cross build is the libc's fault.
+
+### ELF_ST_TYPE is a conflict, not a gap
+
+`elfFile.hpp` redefines the width-agnostic spelling in terms of the
+width-specific one:
+
+```c
+#if !defined(_ALLBSD_SOURCE) || defined(__APPLE__)
+#define ELF_ST_TYPE ELF64_ST_TYPE
+#endif
+```
+
+The guard assumes no libc defines `ELF_ST_TYPE` itself. Bionic does, in
+`<linux/elf.h>`:
+
+```c
+#define ELF_ST_TYPE(x) ((x) & 0xf)      // line 103
+... ELF64_ST_TYPE ...                   // line 107, in terms of the above
+```
+
+So HotSpot's line points `ELF_ST_TYPE` at `ELF64_ST_TYPE`, which Bionic points
+back at `ELF_ST_TYPE`. The preprocessor refuses to expand a macro inside its
+own expansion, stops, and leaves a bare identifier:
+
+```
+elfFile.hpp:50:9: warning: 'ELF_ST_TYPE' macro redefined
+elfSymbolTable.cpp:50:19: error: use of undeclared identifier 'ELF64_ST_TYPE'
+```
+
+The fix is to not redefine what the platform already spells, at both the 64-
+and 32-bit sites. Bionic's `((x) & 0xf)` is the same low nibble HotSpot wanted,
+and is correct for both ELF widths.
+
+This is a genuine upstream portability bug rather than something android-
+specific: any libc that defines `ELF_ST_TYPE` would hit it.
 
 So a working Android JDK needs a source port on top of the build plumbing, and
 this patch now carries the start of one. Each accommodation follows the
