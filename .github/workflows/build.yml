@@ -47,6 +47,30 @@ jobs:
       - name: Assemble the debug APK
         run: ./gradlew :app:assembleDebug
 
+      # The whole point of resolving EGL by hand: a DT_NEEDED on the system
+      # libEGL would have the loader bind every egl* call to the device's
+      # driver before Mesa's copy is ever opened, and Zink could never work.
+      # That is invisible in the source once it regresses - someone re-adds a
+      # find_library, or a new direct call slips in - so it is asserted on the
+      # built object. The host readelf reads an aarch64 ELF fine.
+      - name: Check the GLFW bridge binds no graphics driver at load time
+        run: |
+          set -euo pipefail
+          apk=$(find app/build/outputs/apk/debug -name '*.apk' | head -n 1)
+          tmp=$(mktemp -d)
+          unzip -q -o "$apk" 'lib/arm64-v8a/libglfw.so' -d "$tmp"
+          so="$tmp/lib/arm64-v8a/libglfw.so"
+
+          echo "libglfw.so needs:"
+          readelf -d "$so" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/  \1/p'
+
+          if readelf -d "$so" | grep -qE 'NEEDED.*\[lib(EGL|GLESv2|GLESv3|GL)\.so'; then
+            echo "libglfw.so is linked against a graphics driver." >&2
+            echo "Those must be resolved at runtime instead - see glfw/nikegl.c." >&2
+            exit 1
+          fi
+          echo "ok: no graphics driver bound at load time"
+
       - name: Upload the APK
         uses: actions/upload-artifact@v4
         with:
