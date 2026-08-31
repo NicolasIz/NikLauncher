@@ -77,6 +77,38 @@ build system takes one toolchain type for both host and target, so with
 `--with-toolchain-type=clang` the buildjdk is handed clang-only flags such as
 `-flimit-debug-info`; compiling it with gcc turns those into errors.
 
+## What upstream's Android support is, and is not
+
+The 21 lines in the OpenJDK Mobile Project are **build-system plumbing only**.
+They teach configure and the makefiles that `android` is a target and that
+HotSpot should compile its linux sources. They contain no accommodation for
+Bionic itself.
+
+That distinction was not visible from reading, only from building. Once the
+build reached HotSpot for the target it hit real glibc assumptions:
+
+```
+os_linux.cpp:596: error: "glibc too old (< 2.3.2)"
+os_linux.cpp:605: use of undeclared identifier '_CS_GNU_LIBC_VERSION'
+os_linux.cpp:1907: no member named 'dlinfo' in the global namespace
+elfSymbolTable.cpp:50: use of undeclared identifier 'ELF_ST_TYPE'
+```
+
+So a working Android JDK needs a source port on top of the build plumbing, and
+this patch now carries the start of one. Each accommodation follows the
+existing `MUSL_LIBC` branch in `os_linux.cpp`: HotSpot already has a pattern
+for a libc that is not glibc, and Android joins it rather than inventing a new
+mechanism.
+
+| Site | Bionic difference |
+| ---- | ----------------- |
+| `libpthread_init` | No `confstr(_CS_GNU_LIBC_VERSION)`; the strings are diagnostic |
+| `dll_path` | No `dlinfo(RTLD_DI_LINKMAP)` for applications; the path is diagnostic |
+| `ElfSymbolTable::compare` | `ELF32_ST_TYPE`/`ELF64_ST_TYPE` exist, the width-agnostic spelling does not |
+
+**This list is not known to be complete.** Each build round reveals only the
+errors the compiler reached before stopping.
+
 ## Three files the Mobile Project never needed
 
 `JvmMapfile.gmk`, `GensrcAdlc.gmk` and `JvmOverrideFiles.gmk` are not in

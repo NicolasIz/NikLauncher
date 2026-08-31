@@ -260,6 +260,55 @@ index be1ac3f1f..44f37d85c 100644
  
    LIBJSOUND_CFLAGS := \
        $(ALSA_CFLAGS) \
+diff --git a/src/hotspot/os/linux/os_linux.cpp b/src/hotspot/os/linux/os_linux.cpp
+index a163b8648..9d8159ebd 100644
+--- a/src/hotspot/os/linux/os_linux.cpp
++++ b/src/hotspot/os/linux/os_linux.cpp
+@@ -591,12 +591,17 @@ void os::init_system_properties_values() {
+ 
+ void os::Linux::libpthread_init() {
+   // Save glibc and pthread version strings.
+-#if !defined(_CS_GNU_LIBC_VERSION) || \
+-    !defined(_CS_GNU_LIBPTHREAD_VERSION)
++#if !defined(ANDROID) && (!defined(_CS_GNU_LIBC_VERSION) || \
++    !defined(_CS_GNU_LIBPTHREAD_VERSION))
+   #error "glibc too old (< 2.3.2)"
+ #endif
+ 
+-#ifdef MUSL_LIBC
++#ifdef ANDROID
++  // Bionic answers no confstr query about a libc version, and reports its own
++  // through a different mechanism entirely. These strings are diagnostic.
++  os::Linux::set_libc_version("bionic - unknown");
++  os::Linux::set_libpthread_version("bionic - unknown");
++#elif defined(MUSL_LIBC)
+   // confstr() from musl libc returns EINVAL for
+   // _CS_GNU_LIBC_VERSION and _CS_GNU_LIBPTHREAD_VERSION
+   os::Linux::set_libc_version("musl - unknown");
+@@ -1900,15 +1905,22 @@ void * os::Linux::dll_load_in_vmthread(const char *filename, char *ebuf,
+ }
+ 
+ const char* os::Linux::dll_path(void* lib) {
++  assert(lib != nullptr, "dll_path parameter must not be null");
++#ifdef ANDROID
++  // Bionic exposes no equivalent of dlinfo(RTLD_DI_LINKMAP) to applications.
++  // The result feeds diagnostics only, so an unknown path costs a less
++  // informative message rather than correctness.
++  return nullptr;
++#else
+   struct link_map *lmap;
+   const char* l_path = nullptr;
+-  assert(lib != nullptr, "dll_path parameter must not be null");
+ 
+   int res_dli = ::dlinfo(lib, RTLD_DI_LINKMAP, &lmap);
+   if (res_dli == 0) {
+     l_path = lmap->l_name;
+   }
+   return l_path;
++#endif
+ }
+ 
+ static unsigned count_newlines(const char* s) {
 diff --git a/src/hotspot/os/posix/os_posix.cpp b/src/hotspot/os/posix/os_posix.cpp
 index 7d1397120..c25500517 100644
 --- a/src/hotspot/os/posix/os_posix.cpp
@@ -273,6 +322,23 @@ index 7d1397120..c25500517 100644
    clock_tics_per_sec = CLK_TCK;
  #else
    clock_tics_per_sec = sysconf(_SC_CLK_TCK);
+diff --git a/src/hotspot/share/utilities/elfSymbolTable.cpp b/src/hotspot/share/utilities/elfSymbolTable.cpp
+index 868457418..326e6e8bb 100644
+--- a/src/hotspot/share/utilities/elfSymbolTable.cpp
++++ b/src/hotspot/share/utilities/elfSymbolTable.cpp
+@@ -46,6 +46,12 @@ ElfSymbolTable::~ElfSymbolTable() {
+   }
+ }
+ 
++#if defined(ANDROID) && !defined(ELF_ST_TYPE)
++// Bionic defines ELF32_ST_TYPE and ELF64_ST_TYPE but not the width-agnostic
++// spelling glibc adds. Both extract the same low nibble.
++#define ELF_ST_TYPE(info) ((info) & 0x0f)
++#endif
++
+ bool ElfSymbolTable::compare(const Elf_Sym* sym, address addr, int* stringtableIndex, int* posIndex, int* offset, ElfFuncDescTable* funcDescTable) {
+   if (STT_FUNC == ELF_ST_TYPE(sym->st_info)) {
+     Elf_Word st_size = sym->st_size;
 diff --git a/src/java.base/unix/native/libnet/net_util_md.h b/src/java.base/unix/native/libnet/net_util_md.h
 index 902cf9673..00c662d5b 100644
 --- a/src/java.base/unix/native/libnet/net_util_md.h
