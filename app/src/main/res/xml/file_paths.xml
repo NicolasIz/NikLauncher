@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Only the logs directory is exposed, and only for reading. A session log is
+    the one thing a player has to hand when a launch fails, and internal
+    storage is not browsable without a PC - so it has to leave the app through
+    a share sheet or it does not leave at all. Nothing else the launcher keeps
+    (accounts, instances, the game's own files) belongs on that path.
+-->
+<paths>
+    <files-path name="session-logs" path="logs/" />
+</paths>

@@ -12,22 +12,32 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Science
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import com.niklauncher.app.data.LogSharing
 import com.niklauncher.app.data.ProbeReport
 import com.niklauncher.app.ui.LauncherViewModel
 import com.niklauncher.app.ui.component.SectionHeader
 import com.niklauncher.app.ui.component.StatusCard
 import com.niklauncher.app.ui.component.StatusTone
 import androidx.compose.material.icons.filled.Inventory2
+import com.niklauncher.core.io.SessionLogs
+import java.text.DateFormat
+import java.util.Date
 
 /**
  * Runs the native probe and reports what it found.
@@ -98,7 +108,71 @@ fun DiagnosticsScreen(viewModel: LauncherViewModel) {
                 tone = StatusTone.NEUTRAL,
             )
         }
+
+        SessionLogSection(viewModel)
     }
+}
+
+/**
+ * The last session's log.
+ *
+ * This is here and not only on the failure screen because the failure screen
+ * is not always reached: when the game calls System.exit its whole process
+ * disappears and the launcher never renders anything, so the log is the only
+ * account of what happened. Reading it needs no cable and no PC.
+ */
+@Composable
+private fun SessionLogSection(viewModel: LauncherViewModel) {
+    val context = LocalContext.current
+    val log by viewModel.lastSessionLog.collectAsState()
+    var tail by remember { mutableStateOf<String?>(null) }
+
+    // Refreshed on open rather than watched: the game runs in another process,
+    // so there is nothing here to notify when it writes.
+    LaunchedEffect(Unit) { viewModel.refreshSessionLogs() }
+    LaunchedEffect(log) { tail = log?.let { viewModel.sessionLogTail(it) } }
+
+    SectionHeader(
+        title = "Registro de la última sesión",
+        subtitle = "Lo que dijo la máquina virtual la última vez que se intentó jugar.",
+    )
+
+    when (val entry = log) {
+        null -> StatusCard(
+            icon = Icons.Filled.Description,
+            title = "Todavía no hay ninguno",
+            body = "Aparecerá aquí en cuanto se intente iniciar una sesión.",
+            tone = StatusTone.NEUTRAL,
+        )
+
+        else -> {
+            StatusCard(
+                icon = Icons.Filled.Description,
+                title = describe(entry),
+                body = tail ?: "Leyendo…",
+                tone = StatusTone.NEUTRAL,
+            )
+            OutlinedButton(
+                onClick = {
+                    LogSharing.chooserFor(context, entry.file)?.let(context::startActivity)
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Compartir el registro completo")
+            }
+        }
+    }
+}
+
+/** Name, age and size: enough to tell the run that just failed from an older one. */
+private fun describe(entry: SessionLogs.Entry): String = buildString {
+    append(entry.name)
+    if (entry.previous) append(" (la sesión anterior)")
+    append(" · ")
+    append(DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+        .format(Date(entry.modifiedEpochMillis)))
+    append(" · ")
+    append(entry.sizeBytes / 1024).append(" KB")
 }
 
 @Composable

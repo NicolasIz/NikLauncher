@@ -14,10 +14,12 @@ import com.niklauncher.core.control.ControlButton
 import com.niklauncher.core.control.ControlLayout
 import com.niklauncher.core.control.ControlPresets
 import com.niklauncher.core.instance.Instance
+import com.niklauncher.core.io.SessionLogs
 import com.niklauncher.core.instance.ModLoader
 import com.niklauncher.core.runtime.GraphicsBackend
 import com.niklauncher.core.runtime.JavaRuntime
 import com.niklauncher.core.settings.LauncherSettings
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -25,6 +27,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 /** What the launcher knows about the native runtime layer right now. */
@@ -60,6 +63,34 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
     val probeReport: StateFlow<ProbeReport?> = _probeReport.asStateFlow()
 
     private var installJob: Job? = null
+
+    private val sessionLogs = SessionLogs(container.paths.logs)
+
+    private val _lastSessionLog = MutableStateFlow<SessionLogs.Entry?>(null)
+
+    /**
+     * The last session's log, if there is one.
+     *
+     * Read on demand rather than watched: the game runs in its own process, so
+     * nothing here is notified when that process writes or dies - and when
+     * Minecraft calls System.exit there is no failure screen at all, only this
+     * file. Refreshing when the screen is opened is what makes it findable.
+     */
+    val lastSessionLog: StateFlow<SessionLogs.Entry?> = _lastSessionLog.asStateFlow()
+
+    fun refreshSessionLogs() {
+        viewModelScope.launch {
+            _lastSessionLog.value = withContext(Dispatchers.IO) { sessionLogs.latest() }
+        }
+    }
+
+    /**
+     * The end of a log, for showing without opening a file the phone cannot
+     * browse. Short by default: this is a preview that says which run it was
+     * and roughly how it ended, and the whole file is one share away.
+     */
+    suspend fun sessionLogTail(entry: SessionLogs.Entry, lines: Int = PREVIEW_LINES): String? =
+        withContext(Dispatchers.IO) { sessionLogs.tail(entry.file, lines) }
 
     init {
         viewModelScope.launch { container.instances.load() }
@@ -266,6 +297,11 @@ class LauncherViewModel(private val container: AppContainer) : ViewModel() {
 
     fun updateSettings(transform: (LauncherSettings) -> LauncherSettings) {
         viewModelScope.launch { container.settings.update(transform) }
+    }
+
+    private companion object {
+        /** Enough of a log to see how a run ended, without filling the screen. */
+        const val PREVIEW_LINES = 12
     }
 
     class Factory(private val container: AppContainer) : ViewModelProvider.Factory {

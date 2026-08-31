@@ -48,6 +48,22 @@
             android:screenOrientation="sensorLandscape"
             android:launchMode="singleTask"
             android:theme="@style/Theme.NikLauncher" />
+        <!--
+            A session log is the only account of a failed launch, and internal
+            storage cannot be browsed from the phone - so the launcher hands
+            the file to a share sheet rather than printing a path nobody can
+            open. Not exported: only URIs the launcher grants can be read.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.logs"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
     </application>
 
 </manifest>

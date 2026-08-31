@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -18,14 +19,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.niklauncher.app.data.LogSharing
 import com.niklauncher.app.input.ControlOverlay
 import com.niklauncher.core.control.ControlButton
 import com.niklauncher.core.control.ControlJoystick
 import com.niklauncher.core.control.ControlLayout
 import kotlinx.coroutines.flow.StateFlow
+import java.io.File
 
 /**
  * What the player sees during a session: the game's own surface, and - until it
@@ -73,7 +77,7 @@ fun GameScreen(
                 onJoystickReleased = onJoystickReleased,
             )
 
-            is GameState.Failed -> Failure(value.reason, value.logTail, onExit)
+            is GameState.Failed -> Failure(value.reason, value.logTail, value.log, onExit)
         }
     }
 }
@@ -92,7 +96,8 @@ private fun Message(text: String) {
 }
 
 @Composable
-private fun Failure(reason: String, logTail: String?, onExit: () -> Unit) {
+private fun Failure(reason: String, logTail: String?, log: File?, onExit: () -> Unit) {
+    val context = LocalContext.current
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
             verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -125,6 +130,16 @@ private fun Failure(reason: String, logTail: String?, onExit: () -> Unit) {
                         .weight(1f, fill = false)
                         .verticalScroll(rememberScrollState()),
                 )
+            }
+            // The tail is what fits on a phone screen; the whole log is what
+            // actually explains a failure, and this is the only way it leaves
+            // internal storage without a cable.
+            if (log != null && LogSharing.canShare(log)) {
+                OutlinedButton(onClick = {
+                    LogSharing.chooserFor(context, log)?.let(context::startActivity)
+                }) {
+                    Text("Compartir el registro completo")
+                }
             }
             Button(onClick = onExit) { Text("Volver") }
         }

@@ -12,6 +12,7 @@ import com.niklauncher.core.control.ControlPresets
 import com.niklauncher.core.install.InstallPlan
 import com.niklauncher.core.install.InstallPlanner
 import com.niklauncher.core.instance.Instance
+import com.niklauncher.core.io.SessionLogs
 import com.niklauncher.core.launch.DisplaySize
 import com.niklauncher.core.launch.LaunchAccount
 import com.niklauncher.core.launch.LaunchPlanner
@@ -35,9 +36,14 @@ sealed interface GameState {
     /**
      * [logTail] is shown on screen rather than only written to a file: internal
      * storage is not browsable without a PC, so a path the player cannot open
-     * is not a diagnosis they can send back.
+     * is not a diagnosis they can send back. [log] is the whole thing, offered
+     * for sharing, because the tail is often not where the cause is.
      */
-    data class Failed(val reason: String, val logTail: String? = null) : GameState
+    data class Failed(
+        val reason: String,
+        val logTail: String? = null,
+        val log: File? = null,
+    ) : GameState
 }
 
 /**
@@ -68,6 +74,8 @@ class GameSession(
     private var runtime: InstalledRuntime? = null
     private var display = DisplaySize(1280, 720)
     private var started = false
+
+    private val logs = SessionLogs(container.paths.logs)
 
     fun onButtonPressed(button: ControlButton) = dispatch(input.press(button))
 
@@ -177,7 +185,10 @@ class GameSession(
         _state.value = GameState.Running
         Log.i(TAG, "Starting ${plan.backend.displayName} session for $instanceId")
 
-        val log = File(container.paths.logs, "session-$instanceId.log")
+        // Rotated here rather than appended to: the tail of a log holding
+        // three runs points at whichever one printed last, which is not
+        // necessarily this one.
+        val log = logs.beginSession(instanceId)
         val result = JvmBridge.launch(
             runtime = installed,
             command = plan.command,
@@ -189,7 +200,7 @@ class GameSession(
             // The path matters as much as the reason: what HotSpot or Minecraft
             // said is in there, and the reason alone is often just "it did not
             // start".
-            _state.value = GameState.Failed(result.reason, tailOf(log))
+            _state.value = GameState.Failed(result.reason, logs.tail(log), log)
         }
     }
 
@@ -245,18 +256,7 @@ class GameSession(
         append(instance.memoryMegabytes).append(" MB")
     }
 
-    /**
-     * The end of the log, which is where the reason lives: HotSpot's complaint
-     * about a VM it could not create, or the stack trace of whatever threw.
-     */
-    private fun tailOf(log: File): String? = runCatching {
-        if (!log.isFile) return@runCatching null
-        val lines = log.readLines()
-        lines.takeLast(LOG_TAIL_LINES).joinToString("\n").takeIf { it.isNotBlank() }
-    }.getOrNull()
-
     private companion object {
         const val TAG = "NikLauncher"
-        const val LOG_TAIL_LINES = 40
     }
 }
