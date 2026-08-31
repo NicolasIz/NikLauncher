@@ -20,6 +20,7 @@
 #include <android/log.h>
 #include <android/native_window.h>
 #include <pthread.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,8 +28,33 @@
 #include <time.h>
 
 #define LOG_TAG "NikGLFW"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+
+/*
+ * To logcat and to stderr, both.
+ *
+ * These messages are the whole account of why a graphics backend did not
+ * start - which EGL call failed and with what error - and logcat needs a PC
+ * to read. The launcher redirects stderr into the session log before the VM
+ * starts, and that file the player can share from the phone, so a failure on
+ * a device nobody can attach to still explains itself.
+ */
+__attribute__((format(printf, 3, 4)))
+static void nikglfw_log(int priority, const char *level, const char *format, ...) {
+    va_list args;
+
+    va_start(args, format);
+    __android_log_vprint(priority, LOG_TAG, format, args);
+    va_end(args);
+
+    va_start(args, format);
+    fprintf(stderr, "[" LOG_TAG "] %s: ", level);
+    vfprintf(stderr, format, args);
+    fputc('\n', stderr);
+    va_end(args);
+}
+
+#define LOGI(...) nikglfw_log(ANDROID_LOG_INFO, "info", __VA_ARGS__)
+#define LOGE(...) nikglfw_log(ANDROID_LOG_ERROR, "error", __VA_ARGS__)
 
 #define NIK_EXPORT __attribute__((visibility("default")))
 
