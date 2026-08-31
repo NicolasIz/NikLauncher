@@ -12,10 +12,6 @@ on:
         description: "Publish the built components as a pre-release"
         type: boolean
         default: false
-      probe_mesa:
-        description: "Read Mesa's build options without compiling (scaffolding)"
-        type: boolean
-        default: false
 
 permissions:
   contents: write
@@ -302,19 +298,21 @@ jobs:
           path: out/lwjgl-*.tar.gz*
           if-no-files-found: error
 
-  # Scaffolding, not a build.
+  # Desktop OpenGL over Vulkan, for Minecraft 1.17 and newer.
   #
-  # Mesa is a long compile, and its meson options cannot be read from the
-  # environment this workflow is authored in, so guessing them would cost
-  # fifteen-minute cycles to discover a typo. This job does the reading on the
-  # runner instead: it prints the authoritative option list, then runs
-  # `meson setup` - which validates every option and resolves every dependency
-  # in well under a minute - and stops before compiling anything.
+  # gl4es covers up to 1.16, where the game only asks for GL 2.1. From 1.17 it
+  # requires a 3.2 core profile, which gl4es cannot give, so those versions go
+  # through Zink on top of the device's own Vulkan driver.
   #
-  # Deleted once the Zink build is green.
-  mesa-probe:
-    name: Probe Mesa's build options
-    if: ${{ inputs.probe_mesa }}
+  # No Vulkan driver is built: the S24 Ultra already ships one for its GPU, and
+  # replacing a vendor driver with Mesa's would trade something that works for
+  # something worse. Zink is the only gallium driver enabled.
+  #
+  # Every option below was validated by a configure-only probe before this job
+  # was written to compile anything, because Mesa is a long build and finding a
+  # typo after fifteen minutes is an expensive way to learn.
+  mesa:
+    name: Build Mesa/Zink (desktop GL over Vulkan)
     runs-on: ubuntu-latest
 
     steps:
@@ -330,73 +328,24 @@ jobs:
           sdkmanager --install "ndk;${NDK_VERSION}" >/dev/null
           echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
 
-      # Mesa generates a lot of its source at build time, so the host needs the
-      # generators themselves: mako for the Python templates, bison and flex
-      # for the GLSL parser, glslang for the SPIR-V it feeds to Zink. These are
-      # host tools - none of them ends up inside the pack.
+      # Mesa generates much of its own source, so the host needs the
+      # generators: mako for the Python templates, bison and flex for the GLSL
+      # parser, glslang for the SPIR-V Zink consumes. None ships in the pack.
       - name: Install Mesa's build prerequisites
         run: |
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y -qq bison flex glslang-tools cmake pkg-config
           python3 -m pip install --quiet --upgrade meson ninja mako pyyaml
-          meson --version
-          ninja --version
-          python3 -c "import mako; print('mako', mako.__version__)"
-          glslangValidator --version | head -2
 
-      # Printed so the pinned MESA_REF can be corrected from real data rather
-      # than from memory.
-      - name: List the recent Mesa releases
-        run: |
-          set -euo pipefail
-          git ls-remote --tags https://gitlab.freedesktop.org/mesa/mesa.git \
-            | grep -oE 'mesa-[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -20
-
-      - name: Fetch Mesa
-        run: |
-          set -euo pipefail
-          git clone --depth 1 --branch "$MESA_REF" \
-            https://gitlab.freedesktop.org/mesa/mesa.git upstream-mesa
-          echo "Mesa $MESA_REF at $(git -C upstream-mesa rev-parse --short HEAD)"
-
-      # The authoritative answer to every question about option names, their
-      # accepted values and their defaults.
-      - name: Print the build options
-        run: |
-          set -euo pipefail
-          cd upstream-mesa
-          for f in meson.options meson_options.txt; do
-            if [ -f "$f" ]; then echo "===== $f ====="; cat "$f"; fi
-          done
-
-      - name: Show what is available to build
-        run: |
-          set -euo pipefail
-          cd upstream-mesa
-          echo "===== gallium drivers ====="
-          ls src/gallium/drivers
-          echo "===== Android docs ====="
-          find docs -iname '*android*' -print -exec cat {} \; | head -200
-          echo "===== meson version required ====="
-          grep -m1 meson_version meson.build
-
-      # A cross file is how meson is pointed at the NDK. Written out rather
-      # than committed while the option set is still being established.
-      #
-      # pkg-config is a real binary here, not 'false' as it was on the first
-      # attempt. Setting it to 'false' made every lookup fail as "pkg-config
-      # not found" rather than "dependency not found", which hides which
-      # dependencies are actually missing. pkg_config_libdir instead points at
-      # the cross-built dependencies only, so nothing from the host can leak
-      # into an Android build.
+      # pkg-config is a real binary, with pkg_config_libdir pointing only at
+      # the cross-built dependency tree - so lookups name the dependency that
+      # is missing, while nothing from the host can leak into an Android build.
       - name: Write the NDK cross file
         run: |
           set -euo pipefail
           tc=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin
           deps=$GITHUB_WORKSPACE/android-deps
-          # Created up front: meson reads pkg_config_libdir before anything has
-          # been installed into it.
           mkdir -p "$deps/lib/pkgconfig"
           cat > cross-android-arm64.ini <<INI
           [binaries]
@@ -415,17 +364,13 @@ jobs:
           cpu = 'aarch64'
           endian = 'little'
           INI
-          cat cross-android-arm64.ini
 
-      # Mesa asks for libdrm even with only Zink enabled, so it has to be
-      # cross-compiled first - the same pattern the LWJGL job uses for libffi.
-      # Only the core library is wanted: every hardware-specific backend is off,
-      # since the GPU driver on the device is the vendor's, not Mesa's.
+      # Mesa asks for libdrm even with only Zink enabled. Core library only:
+      # every hardware-specific backend is off, since the GPU driver on the
+      # device is the vendor's.
       - name: Cross-compile libdrm
         run: |
           set -euo pipefail
-          git ls-remote --tags https://gitlab.freedesktop.org/mesa/drm.git \
-            | grep -oE 'libdrm-[0-9.]+$' | sort -V | tail -5
           git clone --depth 1 --branch "$LIBDRM_REF" \
             https://gitlab.freedesktop.org/mesa/drm.git upstream-drm
           meson setup upstream-drm/build-android upstream-drm \
@@ -439,30 +384,19 @@ jobs:
             -Dvalgrind=disabled -Dtests=false
           meson compile -C upstream-drm/build-android
           meson install -C upstream-drm/build-android
-          echo "installed:"
-          find "$GITHUB_WORKSPACE/android-deps" -name 'libdrm*' -o -name '*.pc' | head -20
 
-      # Diagnostic: shows why libdrm is being asked for, so the next decision is
-      # made from Mesa's own build logic rather than from guesswork.
-      - name: Show how Mesa asks for libdrm
+      - name: Fetch Mesa
         run: |
           set -euo pipefail
-          cd upstream-mesa
-          echo "===== meson.build around the libdrm dependency ====="
-          sed -n '1670,1710p' meson.build
-          echo "===== every libdrm mention ====="
-          grep -n 'libdrm' meson.build | head -40
+          git clone --depth 1 --branch "$MESA_REF" \
+            https://gitlab.freedesktop.org/mesa/mesa.git upstream-mesa
+          echo "Mesa $MESA_REF at $(git -C upstream-mesa rev-parse --short HEAD)"
 
-      # Configure only. Every option name and dependency is validated here, so
-      # a mistake surfaces in seconds instead of after a long compile.
-      - name: Try to configure Zink
-        id: configure
-        continue-on-error: true
+      - name: Configure
         run: |
           set -euo pipefail
-          cd upstream-mesa
-          meson setup build-android \
-            --cross-file ../cross-android-arm64.ini \
+          meson setup upstream-mesa/build-android upstream-mesa \
+            --cross-file "$GITHUB_WORKSPACE/cross-android-arm64.ini" \
             --buildtype release \
             -Dplatforms=android \
             -Dandroid-stub=true \
@@ -478,25 +412,69 @@ jobs:
             -Dc_link_args=-Wl,-z,max-page-size=16384 \
             -Dcpp_link_args=-Wl,-z,max-page-size=16384
 
-      # Runs whether or not the configure succeeded: the log is the point.
-      - name: Report what meson decided
-        if: always()
+      - name: Build
+        run: meson compile -C upstream-mesa/build-android
+
+      # Prints everything produced before deciding what to keep: the names Mesa
+      # gives its Android libraries are what the GLFW bridge will have to
+      # dlopen, so they are read from the build rather than assumed.
+      - name: Collect and verify
         run: |
           set -euo pipefail
-          cd upstream-mesa
-          if [ -f build-android/meson-logs/meson-log.txt ]; then
-            echo "===== tail of meson-log.txt ====="
-            tail -120 build-android/meson-logs/meson-log.txt
-          else
-            echo "meson produced no log - it failed before writing one"
-          fi
-          if [ -d build-android ]; then
-            echo "===== resolved options ====="
-            meson configure build-android | head -150 || true
+          echo "===== every shared object Mesa produced ====="
+          find upstream-mesa/build-android -name '*.so*' -type f | sort
+
+          mkdir -p out/mesa
+          find upstream-mesa/build-android -name '*.so' -type f \
+            -exec cp -v {} out/mesa/ \;
+          cp -v "$GITHUB_WORKSPACE/android-deps/lib/libdrm.so" out/mesa/ 2>/dev/null || true
+
+          if [ -z "$(ls -A out/mesa)" ]; then
+            echo "Mesa produced no shared objects" >&2
+            exit 1
           fi
 
-      - name: Fail if the configure failed
-        if: steps.configure.outcome == 'failure'
+          readelf=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf
+          for lib in out/mesa/*.so; do
+            echo "--- $lib"
+            "$readelf" -h "$lib" | grep -E "Machine|Class"
+            for align in $("$readelf" -l "$lib" | awk '/LOAD/ {print $NF}'); do
+              if [ "$((align))" -lt 16384 ]; then
+                echo "PT_LOAD alignment $align is below 16 KB in $lib" >&2
+                exit 1
+              fi
+            done
+            echo "alignment ok"
+          done
+
+      - name: Describe the component
         run: |
-          echo "The candidate option set is wrong; see the log above." >&2
-          exit 1
+          set -euo pipefail
+          cat > out/mesa/component.json <<JSON
+          {
+            "id": "mesa-zink",
+            "backendId": "zink",
+            "upstream": "https://gitlab.freedesktop.org/mesa/mesa",
+            "upstreamRef": "${MESA_REF}",
+            "license": "MIT",
+            "bundles": ["libdrm ${LIBDRM_REF} (MIT)"],
+            "requiresVulkan": true,
+            "abi": "${ANDROID_ABI}",
+            "minSdk": ${ANDROID_API},
+            "maxPageSizeBytes": 16384
+          }
+          JSON
+          cat out/mesa/component.json
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          (cd out && tar -czf mesa-zink-${ANDROID_ABI}.tar.gz mesa)
+          sha1sum out/mesa-zink-${ANDROID_ABI}.tar.gz | tee out/mesa-zink-${ANDROID_ABI}.tar.gz.sha1
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: mesa-zink-${{ env.ANDROID_ABI }}
+          path: out/mesa-zink-*.tar.gz*
+          if-no-files-found: error
