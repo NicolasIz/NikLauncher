@@ -455,11 +455,20 @@ jobs:
           echo "===== every shared object Mesa produced ====="
           find upstream-mesa/build-android -name '*.so*' -type f | sort
 
-          # src/android_stub is deliberately excluded. android-stub=true builds
-          # fake liblog, libcutils, libhardware, libnativewindow and libsync so
-          # Mesa can link without an AOSP tree. They are link-time placeholders;
-          # the device has the real ones. Shipping the stubs would put
-          # non-functional implementations ahead of the platform's own.
+          # src/android_stub is deliberately excluded, and the probe job
+          # settled why. android-stub=true builds stand-ins for liblog,
+          # libcutils, libhardware, libnativewindow and libsync so Mesa can
+          # link without an AOSP tree, and every one of them is a no-op that
+          # returns 0: hw_get_module reports success without setting the
+          # module it was asked for, and ANativeWindow_dequeueBuffer returns
+          # success without dequeueing a buffer. They exist so the link
+          # resolves, and they are never meant to be the implementation.
+          # Shipping them would turn a load failure into a crash on a null
+          # pointer, which is strictly worse. liblog and libnativewindow the
+          # device does hand an app, so those resolve to the real ones;
+          # libcutils and libhardware it does not, and that is the open
+          # problem - the answer is our own implementation of those few
+          # symbols, not Mesa's placeholders.
           mkdir -p out/mesa
           find upstream-mesa/build-android -name '*.so' -type f \
             -not -path '*/android_stub/*' \
@@ -959,6 +968,26 @@ jobs:
           sed -n "/option( *'osmesa'/,/^)/p" meson.options 2>/dev/null \
             || sed -n "/option( *'osmesa'/,/^)/p" meson_options.txt
 
+          # The one question the first round left open. hw_get_module is the
+          # only symbol we cannot honestly implement - it hands out gralloc,
+          # which Android does not let an app reach. Everything else in
+          # libcutils is ours to write in a few lines. So what decides whether
+          # Zink can work at all is what Mesa does when gralloc is simply not
+          # there: if u_gralloc_create failing is fatal, the Android EGL
+          # platform is closed to us; if it degrades, an honest -ENOSYS is
+          # enough and the rest is a device test.
+          echo
+          echo "===== what happens when no gralloc backend works ====="
+          echo "--- src/util/u_gralloc/u_gralloc.c"
+          cat src/util/u_gralloc/u_gralloc.c
+          echo
+          echo "--- the fallback backend's create path"
+          sed -n '150,230p' src/util/u_gralloc/u_gralloc_fallback.c
+          echo
+          echo "--- every u_gralloc_create caller, and what it does with NULL"
+          grep -rn -A 12 "u_gralloc_create" --include=*.c --include=*.cpp src \
+            | grep -v "u_gralloc/u_gralloc" | head -60
+
       # Each candidate is configured, built far enough to produce the library
       # the launcher would dlopen, and then read for its real DT_NEEDED. A
       # candidate that needs neither libcutils nor libhardware - or that needs
@@ -1036,16 +1065,16 @@ jobs:
             -Dplatforms=android -Dandroid-stub=true -Dandroid-strict=false \
             -Dplatform-sdk-version=${ANDROID_API} -Degl=enabled
 
-          # 2. No window platform at all. EGL keeps its surfaceless and device
-          #    platforms, which need no gralloc - at the cost of having to blit
-          #    to the ANativeWindow ourselves.
-          probe surfaceless \
-            -Dplatforms= -Degl=enabled
-
-          # 3. No EGL either: render through OSMesa into memory we own. The
-          #    coarsest option, and the one with the fewest platform demands.
-          probe osmesa \
-            -Dplatforms= -Degl=disabled -Dosmesa=true
+          # Two candidates are not run any more because the first round
+          # closed them. Without -Dplatforms=android, Mesa still compiles as
+          # Android - host_machine.system() is what decides that - so
+          # src/util and Zink go on including <cutils/trace.h> and
+          # <cutils/native_handle.h>; but -Dandroid-stub=true is rejected
+          # outright without the android platform, so the headers that would
+          # satisfy them are no longer in the include path. Both died there,
+          # in libmesa_util and in libzink respectively. Neither surfaceless
+          # nor OSMesa is reachable without patching Mesa itself, so the
+          # Android platform above is the only way in.
 
           echo
           echo "############################################################"
