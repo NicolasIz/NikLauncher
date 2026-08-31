@@ -44,7 +44,9 @@ turned off - X11, fontconfig and CUPS - and the other three already fall out
 correctly: freetype is satisfied by the bundled copy the `lib-freetype.m4` hunk
 selects, ALSA is gated on the target being exactly `xlinux` so android misses
 it, and FFI is only wanted for the `zero` JVM variant.
+| `spec.gmk.in` | Define `OPENJDK_TARGET_OS_VARIANT` once, for the whole build |
 | `Modules.gmk`, `JdkNativeCompilation.gmk` | Take Java and native sources from the `linux` tree |
+| `GensrcProperties.gmk` | Strip that extra source root back off when deriving a package |
 
 `JdkNativeCompilation.gmk` has **two** lookups, `FindSrcDirsForLib` and
 `FindSrcDirsForComponent`, and both need the linux tree. Patching only the
@@ -63,8 +65,53 @@ lives in `linux/native/libnio` and was not, because libraries are found through
 | `JvmMapfile.gmk` | Take the linux symbol-dump branch |
 | `GensrcAdlc.gmk` | Give ADLC the linux OS defines |
 | `JvmOverrideFiles.gmk` | Large-file support and the clang PCH exclusions |
-| `os_posix.cpp` | Bionic has no `CLK_TCK`; ask `sysconf` as Linux does |
 | `net_util_md.h` | Bionic wants `netinet/in.h` ahead of `netdb.h` |
+| `os_linux.cpp` | Two Bionic gaps in diagnostic code paths |
+
+## The JVM's OS defines are the linux ones, unchanged
+
+An earlier version of this patch gave the JVM
+`-DLINUX -D_ALLBSD_SOURCE -DANDROID`. `_ALLBSD_SOURCE` is the BSD and macOS
+marker, and it does not belong on a Linux kernel. It reaches sixteen places in
+HotSpot, and setting it here quietly did three wrong things:
+
+- `elfFile.hpp` guards `#define ELF_ST_TYPE ELF64_ST_TYPE` with
+  `!defined(_ALLBSD_SOURCE)`, so `ELF_ST_TYPE` went undefined and
+  `elfSymbolTable.cpp` stopped compiling. That was read as a Bionic gap and
+  patched with a hand-written macro. It was not a Bionic gap.
+- `os_posix.cpp` took the BSD `clock_tics_per_sec = CLK_TCK` branch instead of
+  `sysconf(_SC_CLK_TCK)`. That too was patched around rather than traced.
+- `arguments.cpp` guards `UseLargePages` on `!defined(_ALLBSD_SOURCE)`, so it
+  was being turned off by accident rather than by decision.
+
+The defines are now exactly upstream's linux pair:
+
+```
+CFLAGS_OS_DEF_JVM="-DLINUX -D_FILE_OFFSET_BITS=64"
+```
+
+and both workaround hunks are gone - the patch touches two source files now
+rather than four. Nothing needs `-DANDROID` either: the NDK clang predefines
+`__ANDROID__`, which is what the two remaining guards test, so they cannot go
+quietly dead if a flag is ever dropped. `_GNU_SOURCE` is likewise predefined
+for C++ on this target, which is what keeps `os.cpp` on the `tm_gmtoff`
+timezone path - checked with `clang --target=aarch64-linux-android31 -x c++
+-dM -E`, not assumed.
+
+The JDK half still needs `-DLINUX` written out. Upstream appends
+`-D$OPENJDK_TARGET_OS_UPPERCASE`, which gives `-DANDROID` here, and the JDK's
+native sources are the linux ones and test `LINUX`.
+
+## Debug symbols are off
+
+`--with-native-debug-symbols` defaults to `external`, which compiles
+everything with `-g` and then asks `NativeCompilation.gmk` for an objcopy
+recipe it only knows how to write for linux, windows, aix and macosx. For
+android no branch matches, `$1_DEBUGINFO_FILES` comes out empty, and the rule
+below it degenerates to an empty target list - which GNU make accepts silently
+as a no-op, so this was never going to fail, it was just going to build large
+libraries with no symbols extracted from them. The pack is downloaded to a
+phone, so `none` is both smaller and honest about what is happening.
 
 ## The target triple is not in the OS defines
 
@@ -104,8 +151,13 @@ build reached HotSpot for the target it hit real glibc assumptions:
 os_linux.cpp:596: error: "glibc too old (< 2.3.2)"
 os_linux.cpp:605: use of undeclared identifier '_CS_GNU_LIBC_VERSION'
 os_linux.cpp:1907: no member named 'dlinfo' in the global namespace
-elfSymbolTable.cpp:50: use of undeclared identifier 'ELF_ST_TYPE'
 ```
+
+A fourth error in that batch, `elfSymbolTable.cpp:50: use of undeclared
+identifier 'ELF_ST_TYPE'`, looked like a fifth Bionic gap and was patched as
+one. It was not: it was this patch's own `-D_ALLBSD_SOURCE`, and it is gone
+along with the define. Worth remembering when the next one of these appears -
+two of the four turned out to be self-inflicted.
 
 So a working Android JDK needs a source port on top of the build plumbing, and
 this patch now carries the start of one. Each accommodation follows the
@@ -117,7 +169,6 @@ mechanism.
 | ---- | ----------------- |
 | `libpthread_init` | No `confstr(_CS_GNU_LIBC_VERSION)`; the strings are diagnostic |
 | `dll_path` | No `dlinfo(RTLD_DI_LINKMAP)` for applications; the path is diagnostic |
-| `ElfSymbolTable::compare` | `ELF32_ST_TYPE`/`ELF64_ST_TYPE` exist, the width-agnostic spelling does not |
 
 ### The linker flag
 
@@ -171,18 +222,28 @@ LIBS_linux := -ljli -lpthread $(LIBDL),      # LauncherCommon.gmk
 Nothing was missing from the build - `libjli.so` was produced from exactly the
 right eight sources. `-ljli` was simply never on the link line.
 
-The patch adds one mapping in `NativeCompilation.gmk` rather than an `android`
-copy of all 23, each of which would then have to be kept correct by hand:
+The patch adds one mapping rather than an `android` copy of all 23, each of
+which would then have to be kept correct by hand. It sits in `spec.gmk.in`,
+beside the definition of `OPENJDK_TARGET_OS` itself, so every makefile in the
+build has it:
 
 ```make
 ifeq ($(OPENJDK_TARGET_OS), android)
   OPENJDK_TARGET_OS_VARIANT := linux
+else
+  OPENJDK_TARGET_OS_VARIANT := $(OPENJDK_TARGET_OS)
 endif
 ```
 
-and uses it at the eighteen lookup sites in that file. All eighteen were
-checked to be variant lookups rather than paths before substituting.
-`OPENJDK_TARGET_OS_TYPE` is left alone: it is already `unix` for android.
+`NativeCompilation.gmk` uses it at the eighteen lookup sites in that file. All
+eighteen were checked to be variant lookups rather than paths before
+substituting. `OPENJDK_TARGET_OS_TYPE` is left alone: it is already `unix` for
+android.
+
+A sweep for `_$(OPENJDK_TARGET_OS)` across the whole make tree finds exactly
+one lookup outside that file, `PLATFORM_MODULES_$(OPENJDK_TARGET_OS)` in
+`Modules.gmk`. That one needs nothing: only `PLATFORM_MODULES_windows` is ever
+defined, so android and linux both read an empty value.
 
 This is the same idea as `HOTSPOT_TARGET_OS`, which `platform.m4` maps onto
 linux for exactly the same reason.
@@ -193,6 +254,48 @@ libc, and the NDK ships no `libpthread.a` or `librt.a` at all - confirmed by
 looking in the sysroot rather than assumed. So both are filtered out of the
 resolved library list, in the same single place, rather than in each of the
 sites that name them.
+
+## The linux source root has to come back off again
+
+Adding `linux/classes` to `SRC_SUBDIRS` gets the linux Java sources compiled,
+but `SRC_SUBDIRS` is not only a search path. `GensrcProperties.gmk` turns a
+`.properties` file into a `ListResourceBundle` class, and works out the
+package to generate it into by stripping the source root off the file's path:
+
+```make
+$(subst /$(OPENJDK_TARGET_OS)/classes,,
+$(subst /$(OPENJDK_TARGET_OS_TYPE)/classes,,
+$(subst /share/classes,, $($1_SRC_FILES))))
+```
+
+Those three patterns are exactly the entries of `SRC_SUBDIRS` upstream. A
+fourth root it does not know about is not stripped, so the bundle is generated
+into a package nobody looks in. Nothing fails at that point - the build is
+perfectly happy to generate a class in the wrong place.
+
+It surfaced a long way from the cause, in the buildjdk's own `jlink`:
+
+```
+jdk.tools.jlink.plugin.Plugin: Provider ...StripNativeDebugSymbolsPlugin
+    could not be instantiated
+Caused by: java.lang.InternalError:
+    Cannot find jlink plugin resource bundle (strip-native-debug-symbols)
+```
+
+`jdk.jlink/linux/classes` holds that plugin, its `module-info.java.extra`
+registering it as a service, and its bundle. The first two arrived, the third
+did not, so `jlink` loaded a plugin whose static initialiser could not find its
+own strings - and `jlink` is what builds the image, so the build stopped.
+
+The fix strips `$(OPENJDK_TARGET_OS_VARIANT)/classes` as well, guarded so that
+nothing changes on a platform where the variant is the target. Checked by
+lifting the arithmetic out of the patched file and running it over a real file
+list for both targets: `linux` output is byte-identical to upstream's, and
+`android` now yields `gensrc/jdk.jlink/jdk/tools/jlink/resources/` rather than
+`gensrc/jdk.jlink/linux/classes/jdk/tools/jlink/resources/`.
+
+`jdk.jpackage/linux/classes` has four more properties files with the same
+shape, so it would have hit this too had the build reached it.
 
 ## Three files the Mobile Project never needed
 

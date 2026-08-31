@@ -1,5 +1,5 @@
 diff --git a/make/autoconf/flags-cflags.m4 b/make/autoconf/flags-cflags.m4
-index ab8c48e16..0db4613d2 100644
+index ab8c48e16..95405083a 100644
 --- a/make/autoconf/flags-cflags.m4
 +++ b/make/autoconf/flags-cflags.m4
 @@ -114,7 +114,7 @@ AC_DEFUN([FLAGS_SETUP_DEBUG_SYMBOLS],
@@ -16,7 +16,7 @@ index ab8c48e16..0db4613d2 100644
    elif test "x$OPENJDK_TARGET_OS" = xwindows; then
      CFLAGS_OS_DEF_JVM="-D_WINDOWS -DWIN32 -D_JNI_IMPLEMENTATION_"
 +  elif test "x$OPENJDK_TARGET_OS" = xandroid; then
-+    CFLAGS_OS_DEF_JVM="-DLINUX -D_ALLBSD_SOURCE -DANDROID"
++    CFLAGS_OS_DEF_JVM="-DLINUX -D_FILE_OFFSET_BITS=64"
 +    # The same feature macros as linux, because these are the sources being
 +    # compiled. Upstream drops _GNU_SOURCE here and defines __USE_BSD instead;
 +    # __USE_BSD is a libc-internal macro that no build should set by hand, and
@@ -116,6 +116,29 @@ index 14de712b5..9069f7beb 100644
    AC_SUBST(HOTSPOT_$1_OS)
  
    HOTSPOT_$1_OS_TYPE=${OPENJDK_$1_OS_TYPE}
+diff --git a/make/autoconf/spec.gmk.in b/make/autoconf/spec.gmk.in
+index 7f085676c..209aaac87 100644
+--- a/make/autoconf/spec.gmk.in
++++ b/make/autoconf/spec.gmk.in
+@@ -83,6 +83,18 @@ OPENJDK_TARGET_OS_TYPE:=@OPENJDK_TARGET_OS_TYPE@
+ OPENJDK_TARGET_OS_ENV:=@OPENJDK_TARGET_OS_ENV@
+ OPENJDK_TARGET_OS_UPPERCASE:=@OPENJDK_TARGET_OS_UPPERCASE@
+ 
++# Android runs a linux kernel behind a different libc, and the sources, source
++# roots and build variables it needs are the linux ones almost everywhere. The
++# alternative to this single name is an android copy of every per-OS variable
++# and every per-OS source root, each one silently skipped wherever it was
++# forgotten rather than reported. Equal to OPENJDK_TARGET_OS on every platform
++# upstream supports, so nothing outside an android build changes.
++ifeq ($(OPENJDK_TARGET_OS), android)
++  OPENJDK_TARGET_OS_VARIANT := linux
++else
++  OPENJDK_TARGET_OS_VARIANT := $(OPENJDK_TARGET_OS)
++endif
++
+ OPENJDK_TARGET_CPU:=@OPENJDK_TARGET_CPU@
+ OPENJDK_TARGET_CPU_ARCH:=@OPENJDK_TARGET_CPU_ARCH@
+ OPENJDK_TARGET_CPU_BITS:=@OPENJDK_TARGET_CPU_BITS@
 diff --git a/make/autoconf/toolchain.m4 b/make/autoconf/toolchain.m4
 index a2b576ac1..5dcb9267e 100644
 --- a/make/autoconf/toolchain.m4
@@ -169,48 +192,40 @@ index 1a1333cf5..510c3d7da 100644
    $(call uniq, $(wildcard \
        $(TOPDIR)/src/$(strip $1)/$(OPENJDK_TARGET_OS)/native/$(strip $2) \
 diff --git a/make/common/Modules.gmk b/make/common/Modules.gmk
-index 0eb0fb2dd..b81f69fed 100644
+index 0eb0fb2dd..7009f5749 100644
 --- a/make/common/Modules.gmk
 +++ b/make/common/Modules.gmk
 @@ -88,6 +88,9 @@ SRC_SUBDIRS += $(OPENJDK_TARGET_OS)/classes
  ifneq ($(OPENJDK_TARGET_OS), $(OPENJDK_TARGET_OS_TYPE))
    SRC_SUBDIRS += $(OPENJDK_TARGET_OS_TYPE)/classes
  endif
-+ifeq ($(OPENJDK_TARGET_OS), android)
-+  SRC_SUBDIRS += linux/classes
++ifneq ($(OPENJDK_TARGET_OS_VARIANT), $(OPENJDK_TARGET_OS))
++  SRC_SUBDIRS += $(OPENJDK_TARGET_OS_VARIANT)/classes
 +endif
  SRC_SUBDIRS += share/classes
  
  SPEC_SUBDIRS += share/specs
 diff --git a/make/common/NativeCompilation.gmk b/make/common/NativeCompilation.gmk
-index 24e76ddc2..88f70dad7 100644
+index 24e76ddc2..53d676b3f 100644
 --- a/make/common/NativeCompilation.gmk
 +++ b/make/common/NativeCompilation.gmk
-@@ -34,6 +34,23 @@ ifeq ($(_MAKEBASE_GMK), )
+@@ -34,6 +34,15 @@ ifeq ($(_MAKEBASE_GMK), )
    $(error You must include MakeBase.gmk prior to including NativeCompilation.gmk)
  endif
  
 +################################################################################
-+# Build variables throughout the tree are written per operating system -
-+# LIBS_linux, CFLAGS_macosx, LDFLAGS_aix and so on - and picked up below by
-+# suffixing the target OS. Android compiles the linux sources, so it wants the
-+# linux variants; without this every LIBS_linux is silently skipped and
-+# libraries simply vanish from link lines, which is how the java launcher came
-+# to be linked with no -ljli at all.
-+#
-+# This mirrors HOTSPOT_TARGET_OS, which platform.m4 maps onto linux for the
-+# same reason. One mapping instead of an android copy of every such variable,
-+# each of which would have to be kept correct by hand.
-+ifeq ($(OPENJDK_TARGET_OS), android)
-+  OPENJDK_TARGET_OS_VARIANT := linux
-+else
-+  OPENJDK_TARGET_OS_VARIANT := $(OPENJDK_TARGET_OS)
-+endif
++# Build variables below are written per operating system - LIBS_linux,
++# CFLAGS_macosx, LDFLAGS_aix and so on - and picked up by suffixing the target
++# OS. They are looked up under OPENJDK_TARGET_OS_VARIANT (defined in spec.gmk)
++# rather than OPENJDK_TARGET_OS so that an android build reads the linux ones:
++# otherwise every LIBS_linux is silently skipped and the libraries simply
++# vanish from the link line, which is how the java launcher came to be linked
++# with no -ljli at all.
 +
  ################################################################################
  # Create exported symbols file for static libraries
  ################################################################################
-@@ -360,7 +377,7 @@ define SetupCompileNativeFileBody
+@@ -360,7 +369,7 @@ define SetupCompileNativeFileBody
      ifneq ($(DISABLE_WARNING_PREFIX), )
        $1_WARNINGS_FLAGS := $$(addprefix $(DISABLE_WARNING_PREFIX), \
          $$($$($1_BASE)_DISABLED_WARNINGS_$(TOOLCHAIN_TYPE)_$$($1_FILENAME)) \
@@ -219,7 +234,7 @@ index 24e76ddc2..88f70dad7 100644
      endif
  
      $1_BASE_CFLAGS :=  $$($$($1_BASE)_CFLAGS) $$($$($1_BASE)_EXTRA_CFLAGS) \
-@@ -743,21 +760,21 @@ define SetupNativeCompilationBody
+@@ -743,21 +752,21 @@ define SetupNativeCompilationBody
  
    # Pickup extra OPENJDK_TARGET_OS_TYPE, OPENJDK_TARGET_OS, TOOLCHAIN_TYPE and
    # OPENJDK_TARGET_OS plus OPENJDK_TARGET_CPU pair dependent variables for CFLAGS.
@@ -247,7 +262,7 @@ index 24e76ddc2..88f70dad7 100644
    endif
    ifeq ($(STATIC_LIBS), true)
      $1_EXTRA_CFLAGS += $$(STATIC_LIBS_CFLAGS)
-@@ -765,18 +782,18 @@ define SetupNativeCompilationBody
+@@ -765,18 +774,18 @@ define SetupNativeCompilationBody
  
    # Pickup extra OPENJDK_TARGET_OS_TYPE, OPENJDK_TARGET_OS and/or TOOLCHAIN_TYPE
    # dependent variables for CXXFLAGS.
@@ -269,7 +284,7 @@ index 24e76ddc2..88f70dad7 100644
    endif
    ifeq ($(STATIC_LIBS), true)
      $1_EXTRA_CXXFLAGS += $$(STATIC_LIB_CFLAGS)
-@@ -811,15 +828,15 @@ define SetupNativeCompilationBody
+@@ -811,15 +820,15 @@ define SetupNativeCompilationBody
          $$(DISABLED_WARNINGS_C) \
          $$($1_DISABLED_WARNINGS_$(TOOLCHAIN_TYPE)) \
          $$($1_DISABLED_WARNINGS_C_$(TOOLCHAIN_TYPE)) \
@@ -289,7 +304,7 @@ index 24e76ddc2..88f70dad7 100644
    endif
  
    # Check if warnings should be considered errors.
-@@ -1040,10 +1057,19 @@ define SetupNativeCompilationBody
+@@ -1040,10 +1049,19 @@ define SetupNativeCompilationBody
    # dependent variables for LDFLAGS and LIBS, and additionally the pair dependent
    # TOOLCHAIN_TYPE plus OPENJDK_TARGET_OS for LDFLAGS, or OPENJDK_TARGET_OS plus
    # TOOLCHAIN_TYPE for LIBS
@@ -313,6 +328,38 @@ index 24e76ddc2..88f70dad7 100644
  
    ifneq ($$($1_REAL_MAPFILE), )
      $1_EXTRA_LDFLAGS += $(call SET_SHARED_LIBRARY_MAPFILE,$$($1_REAL_MAPFILE))
+diff --git a/make/common/modules/GensrcProperties.gmk b/make/common/modules/GensrcProperties.gmk
+index 5db10af27..9d5e38e08 100644
+--- a/make/common/modules/GensrcProperties.gmk
++++ b/make/common/modules/GensrcProperties.gmk
+@@ -87,12 +87,23 @@ define SetupCompilePropertiesBody
+ 
+   # Convert .../src/<module>/share/classes/com/sun/tools/javac/resources/javac_zh_CN.properties
+   # to .../support/gensrc/<module>/com/sun/tools/javac/resources/javac_zh_CN.java
+-  $1_JAVAS := $$(patsubst $$($1_MODULE_PATH_ROOT)/%, \
+-      $(SUPPORT_OUTPUTDIR)/gensrc/%, \
+-      $$(patsubst %.properties, %.java, \
++  # A generated bundle's package is read off its path, so the source root the
++  # properties file was found under has to come back off again. The roots are
++  # exactly the entries of SRC_SUBDIRS: one left unstripped does not fail here,
++  # it puts the bundle in a package nobody looks in, and only surfaces much
++  # later as a MissingResourceException from the plugin that wanted it.
++  $1_STRIPPED := \
+       $$(subst /$(OPENJDK_TARGET_OS)/classes,, \
+       $$(subst /$(OPENJDK_TARGET_OS_TYPE)/classes,, \
+-      $$(subst /share/classes,, $$($1_SRC_FILES))))))
++      $$(subst /share/classes,, $$($1_SRC_FILES))))
++
++  ifneq ($(OPENJDK_TARGET_OS_VARIANT), $(OPENJDK_TARGET_OS))
++    $1_STRIPPED := $$(subst /$(OPENJDK_TARGET_OS_VARIANT)/classes,, $$($1_STRIPPED))
++  endif
++
++  $1_JAVAS := $$(patsubst $$($1_MODULE_PATH_ROOT)/%, \
++      $(SUPPORT_OUTPUTDIR)/gensrc/%, \
++      $$(patsubst %.properties, %.java, $$($1_STRIPPED)))
+ 
+   # Generate the package dirs for the to be generated java files. Sort to remove
+   # duplicates.
 diff --git a/make/hotspot/gensrc/GensrcAdlc.gmk b/make/hotspot/gensrc/GensrcAdlc.gmk
 index bb3564768..9eadfc316 100644
 --- a/make/hotspot/gensrc/GensrcAdlc.gmk
@@ -410,7 +457,7 @@ index be1ac3f1f..44f37d85c 100644
    LIBJSOUND_CFLAGS := \
        $(ALSA_CFLAGS) \
 diff --git a/src/hotspot/os/linux/os_linux.cpp b/src/hotspot/os/linux/os_linux.cpp
-index a163b8648..9d8159ebd 100644
+index a163b8648..906d36aae 100644
 --- a/src/hotspot/os/linux/os_linux.cpp
 +++ b/src/hotspot/os/linux/os_linux.cpp
 @@ -591,12 +591,17 @@ void os::init_system_properties_values() {
@@ -419,13 +466,13 @@ index a163b8648..9d8159ebd 100644
    // Save glibc and pthread version strings.
 -#if !defined(_CS_GNU_LIBC_VERSION) || \
 -    !defined(_CS_GNU_LIBPTHREAD_VERSION)
-+#if !defined(ANDROID) && (!defined(_CS_GNU_LIBC_VERSION) || \
++#if !defined(__ANDROID__) && (!defined(_CS_GNU_LIBC_VERSION) || \
 +    !defined(_CS_GNU_LIBPTHREAD_VERSION))
    #error "glibc too old (< 2.3.2)"
  #endif
  
 -#ifdef MUSL_LIBC
-+#ifdef ANDROID
++#ifdef __ANDROID__
 +  // Bionic answers no confstr query about a libc version, and reports its own
 +  // through a different mechanism entirely. These strings are diagnostic.
 +  os::Linux::set_libc_version("bionic - unknown");
@@ -439,7 +486,7 @@ index a163b8648..9d8159ebd 100644
  
  const char* os::Linux::dll_path(void* lib) {
 +  assert(lib != nullptr, "dll_path parameter must not be null");
-+#ifdef ANDROID
++#ifdef __ANDROID__
 +  // Bionic exposes no equivalent of dlinfo(RTLD_DI_LINKMAP) to applications.
 +  // The result feeds diagnostics only, so an unknown path costs a less
 +  // informative message rather than correctness.
@@ -458,45 +505,15 @@ index a163b8648..9d8159ebd 100644
  }
  
  static unsigned count_newlines(const char* s) {
-diff --git a/src/hotspot/os/posix/os_posix.cpp b/src/hotspot/os/posix/os_posix.cpp
-index 7d1397120..c25500517 100644
---- a/src/hotspot/os/posix/os_posix.cpp
-+++ b/src/hotspot/os/posix/os_posix.cpp
-@@ -1244,7 +1244,7 @@ static bool _use_clock_monotonic_condattr = false;
- // Determine what POSIX API's are present and do appropriate
- // configuration.
- void os::Posix::init(void) {
--#if defined(_ALLBSD_SOURCE)
-+#if defined(_ALLBSD_SOURCE) && !defined(ANDROID)
-   clock_tics_per_sec = CLK_TCK;
- #else
-   clock_tics_per_sec = sysconf(_SC_CLK_TCK);
-diff --git a/src/hotspot/share/utilities/elfSymbolTable.cpp b/src/hotspot/share/utilities/elfSymbolTable.cpp
-index 868457418..326e6e8bb 100644
---- a/src/hotspot/share/utilities/elfSymbolTable.cpp
-+++ b/src/hotspot/share/utilities/elfSymbolTable.cpp
-@@ -46,6 +46,12 @@ ElfSymbolTable::~ElfSymbolTable() {
-   }
- }
- 
-+#if defined(ANDROID) && !defined(ELF_ST_TYPE)
-+// Bionic defines ELF32_ST_TYPE and ELF64_ST_TYPE but not the width-agnostic
-+// spelling glibc adds. Both extract the same low nibble.
-+#define ELF_ST_TYPE(info) ((info) & 0x0f)
-+#endif
-+
- bool ElfSymbolTable::compare(const Elf_Sym* sym, address addr, int* stringtableIndex, int* posIndex, int* offset, ElfFuncDescTable* funcDescTable) {
-   if (STT_FUNC == ELF_ST_TYPE(sym->st_info)) {
-     Elf_Word st_size = sym->st_size;
 diff --git a/src/java.base/unix/native/libnet/net_util_md.h b/src/java.base/unix/native/libnet/net_util_md.h
-index 902cf9673..00c662d5b 100644
+index 902cf9673..cc7cb6f2a 100644
 --- a/src/java.base/unix/native/libnet/net_util_md.h
 +++ b/src/java.base/unix/native/libnet/net_util_md.h
 @@ -26,6 +26,10 @@
  #ifndef NET_UTILS_MD_H
  #define NET_UTILS_MD_H
  
-+#ifdef ANDROID
++#ifdef __ANDROID__
 +#include <netinet/in.h>
 +#endif
 +
