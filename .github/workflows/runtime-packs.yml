@@ -12,6 +12,10 @@ on:
         description: "Publish the built components as a pre-release"
         type: boolean
         default: false
+      probe_mesa:
+        description: "Read Mesa's build options without compiling (scaffolding)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -30,6 +34,12 @@ env:
   NDK_VERSION: "27.0.12077973"
   ANDROID_API: "31"
   ANDROID_ABI: arm64-v8a
+
+  # Mesa lives on gitlab.freedesktop.org, which is not reachable from the
+  # environment this workflow is written in - only from the runner. So the
+  # options below were not verified locally the way gl4es and LWJGL were, and
+  # the probe job exists to read them from the source itself.
+  MESA_REF: "mesa-25.1.5"
 
 jobs:
   gl4es:
@@ -290,3 +300,144 @@ jobs:
           name: lwjgl-${{ env.ANDROID_ABI }}
           path: out/lwjgl-*.tar.gz*
           if-no-files-found: error
+
+  # Scaffolding, not a build.
+  #
+  # Mesa is a long compile, and its meson options cannot be read from the
+  # environment this workflow is authored in, so guessing them would cost
+  # fifteen-minute cycles to discover a typo. This job does the reading on the
+  # runner instead: it prints the authoritative option list, then runs
+  # `meson setup` - which validates every option and resolves every dependency
+  # in well under a minute - and stops before compiling anything.
+  #
+  # Deleted once the Zink build is green.
+  mesa-probe:
+    name: Probe Mesa's build options
+    if: ${{ inputs.probe_mesa }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out NikLauncher
+        uses: actions/checkout@v4
+
+      - name: Set up the Android SDK and NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install the NDK
+        run: |
+          set -euo pipefail
+          sdkmanager --install "ndk;${NDK_VERSION}" >/dev/null
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Install meson and ninja
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet --upgrade meson ninja
+          meson --version
+          ninja --version
+
+      # Printed so the pinned MESA_REF can be corrected from real data rather
+      # than from memory.
+      - name: List the recent Mesa releases
+        run: |
+          set -euo pipefail
+          git ls-remote --tags https://gitlab.freedesktop.org/mesa/mesa.git \
+            | grep -oE 'mesa-[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -20
+
+      - name: Fetch Mesa
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch "$MESA_REF" \
+            https://gitlab.freedesktop.org/mesa/mesa.git upstream-mesa
+          echo "Mesa $MESA_REF at $(git -C upstream-mesa rev-parse --short HEAD)"
+
+      # The authoritative answer to every question about option names, their
+      # accepted values and their defaults.
+      - name: Print the build options
+        run: |
+          set -euo pipefail
+          cd upstream-mesa
+          for f in meson.options meson_options.txt; do
+            if [ -f "$f" ]; then echo "===== $f ====="; cat "$f"; fi
+          done
+
+      - name: Show what is available to build
+        run: |
+          set -euo pipefail
+          cd upstream-mesa
+          echo "===== gallium drivers ====="
+          ls src/gallium/drivers
+          echo "===== Android docs ====="
+          find docs -iname '*android*' -print -exec cat {} \; | head -200
+          echo "===== meson version required ====="
+          grep -m1 meson_version meson.build
+
+      # A cross file is how meson is pointed at the NDK. Written out rather
+      # than committed while the option set is still being established.
+      - name: Write the NDK cross file
+        run: |
+          set -euo pipefail
+          tc=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin
+          cat > cross-android-arm64.ini <<INI
+          [binaries]
+          c = '$tc/aarch64-linux-android${ANDROID_API}-clang'
+          cpp = '$tc/aarch64-linux-android${ANDROID_API}-clang++'
+          ar = '$tc/llvm-ar'
+          strip = '$tc/llvm-strip'
+          pkg-config = 'false'
+
+          [host_machine]
+          system = 'android'
+          cpu_family = 'aarch64'
+          cpu = 'aarch64'
+          endian = 'little'
+          INI
+          cat cross-android-arm64.ini
+
+      # Configure only. Every option name and dependency is validated here, so
+      # a mistake surfaces in seconds instead of after a long compile.
+      - name: Try to configure Zink
+        id: configure
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          cd upstream-mesa
+          meson setup build-android \
+            --cross-file ../cross-android-arm64.ini \
+            --buildtype release \
+            -Dplatforms=android \
+            -Dandroid-stub=true \
+            -Dplatform-sdk-version=${ANDROID_API} \
+            -Dgallium-drivers=zink \
+            -Dvulkan-drivers= \
+            -Degl=enabled \
+            -Dopengl=true \
+            -Dglx=disabled \
+            -Dgbm=disabled \
+            -Dllvm=disabled \
+            -Dshared-glapi=enabled \
+            -Dc_link_args=-Wl,-z,max-page-size=16384 \
+            -Dcpp_link_args=-Wl,-z,max-page-size=16384
+
+      # Runs whether or not the configure succeeded: the log is the point.
+      - name: Report what meson decided
+        if: always()
+        run: |
+          set -euo pipefail
+          cd upstream-mesa
+          if [ -f build-android/meson-logs/meson-log.txt ]; then
+            echo "===== tail of meson-log.txt ====="
+            tail -120 build-android/meson-logs/meson-log.txt
+          else
+            echo "meson produced no log - it failed before writing one"
+          fi
+          if [ -d build-android ]; then
+            echo "===== resolved options ====="
+            meson configure build-android | head -150 || true
+          fi
+
+      - name: Fail if the configure failed
+        if: steps.configure.outcome == 'failure'
+        run: |
+          echo "The candidate option set is wrong; see the log above." >&2
+          exit 1
