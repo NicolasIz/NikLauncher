@@ -12,6 +12,10 @@ on:
         description: "Publish the built components as a pre-release"
         type: boolean
         default: false
+      probe_openjdk:
+        description: "Configure OpenJDK for Android without building (scaffolding)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -37,6 +41,12 @@ env:
   # the probe job exists to read them from the source itself.
   MESA_REF: "mesa-25.1.5"
   LIBDRM_REF: "libdrm-2.4.124"
+
+  # The OpenJDK Mobile Project. Its Android support is small - 21 lines across
+  # 14 files, only two of them source - because platform.m4 maps android onto
+  # HOTSPOT_OS=linux and lets HotSpot's linux code compile against Bionic.
+  # Pinned to the commit that was read, not to master.
+  OPENJDK_REF: c1ed06aaef34c8dccf71e236d1ffa20918a77cfb
 
 jobs:
   gl4es:
@@ -514,3 +524,106 @@ jobs:
           name: mesa-zink-${{ env.ANDROID_ABI }}
           path: out/mesa-zink-*.tar.gz*
           if-no-files-found: error
+
+  # Scaffolding, not a build.
+  #
+  # OpenJDK is the last missing component and the one most likely not to work.
+  # The OpenJDK Mobile Project carries Android support in tree, and it is
+  # small: platform.m4 maps android onto HOTSPOT_OS=linux, so HotSpot's linux
+  # sources compile against Bionic, and the rest is a handful of accommodations.
+  #
+  # Two things make it uncertain rather than routine. The build defines both
+  # -DLINUX and -D_ALLBSD_SOURCE and puts os/linux and os/bsd on the include
+  # path at once, which is a hybrid no other target uses. And the project's
+  # only branch is master, currently JDK 28 - a development tip, where
+  # sun.misc.Unsafe's memory accessors are marked for removal and Minecraft's
+  # ecosystem targets 17 or 21.
+  #
+  # So this configures and stops, to find out how far the port actually gets
+  # before spending an hour of build time on it.
+  openjdk-probe:
+    name: Probe OpenJDK's Android target
+    if: ${{ inputs.probe_openjdk }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out NikLauncher
+        uses: actions/checkout@v4
+
+      - name: Set up the Android SDK and NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install the NDK
+        run: |
+          set -euo pipefail
+          sdkmanager --install "ndk;${NDK_VERSION}" >/dev/null
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Set up the boot JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install the build prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq autoconf zip unzip build-essential
+
+      - name: Fetch the OpenJDK Mobile Project
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout \
+            https://github.com/openjdk/mobile.git upstream-jdk
+          git -C upstream-jdk checkout -q "$OPENJDK_REF"
+          echo "OpenJDK Mobile at $(git -C upstream-jdk rev-parse --short HEAD)"
+          grep -E "^DEFAULT_VERSION_FEATURE" upstream-jdk/make/conf/version-numbers.conf
+
+      # Configure only. It resolves the toolchain and every dependency, which is
+      # where a cross-compilation target that does not really work shows itself.
+      - name: Try to configure for aarch64-linux-android
+        id: configure
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          tc=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64
+          cd upstream-jdk
+          bash configure \
+            --openjdk-target=aarch64-linux-android \
+            --with-boot-jdk="$JAVA_HOME" \
+            --with-toolchain-type=clang \
+            --with-sysroot="$tc/sysroot" \
+            --with-jvm-variants=server \
+            --with-debug-level=release \
+            --enable-headless-only \
+            --disable-warnings-as-errors \
+            CC="$tc/bin/clang" \
+            CXX="$tc/bin/clang++" \
+            AR="$tc/bin/llvm-ar" \
+            STRIP="$tc/bin/llvm-strip" \
+            NM="$tc/bin/llvm-nm" \
+            OBJCOPY="$tc/bin/llvm-objcopy"
+
+      # Always reported: on this component the failure is the finding.
+      - name: Report what configure decided
+        if: always()
+        run: |
+          set -euo pipefail
+          cd upstream-jdk
+          if [ -f build/*/config.log ]; then
+            echo "===== tail of config.log ====="
+            tail -100 build/*/config.log
+          else
+            echo "no config.log was produced"
+          fi
+          if [ -f build/*/spec.gmk ]; then
+            echo "===== configure succeeded; key settings ====="
+            grep -E "^(OPENJDK_TARGET_OS|OPENJDK_TARGET_CPU|HOTSPOT_TARGET_OS|CC|CXX|BOOT_JDK) " build/*/spec.gmk | head -20
+          fi
+
+      - name: Fail if configure failed
+        if: steps.configure.outcome == 'failure'
+        run: |
+          echo "OpenJDK's Android target did not configure; see the log above." >&2
+          exit 1
