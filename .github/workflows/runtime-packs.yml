@@ -653,6 +653,19 @@ jobs:
             tail -60 "$log"
           fi
 
+          # The build writes the exact command line of every failing step here,
+          # and points at it in its own error message. A link failure is not
+          # diagnosable from the summary alone - whether a library was on the
+          # line at all is only visible in the command.
+          logs=$(find upstream-jdk/build -type d -name failure-logs -print -quit 2>/dev/null || true)
+          if [ -n "$logs" ]; then
+            echo "===== failure-logs ====="
+            for f in "$logs"/*; do
+              echo "--- $(basename "$f")"
+              head -40 "$f"
+            done
+          fi
+
       - name: Fail if configure failed
         if: steps.configure.outcome == 'failure'
         run: |
