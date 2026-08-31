@@ -460,6 +460,52 @@ would have proved nothing:
 | upstream | 1 | `XRectangle` |
 | `-DMACOSX` | 0 | plain struct |
 
+### The rest of libawt reaches Xlib through a different door
+
+Excluding the four X11 and CUPS sources was not the end of it. The next
+failure came through shared code:
+
+```
+BufImgSurfaceData.c -> img_util_md.h -> color.h -> awt.h:38
+    fatal error: 'X11/Xlib.h' file not found
+```
+
+The earlier sweep asked which `.c` files sat beside those headers. The right
+question was which headers shared code can reach, and `awt.h` is reachable
+from `share/native/libawt` through two hops of machine-dependent headers.
+
+All three of those headers already guard their X11 with the same condition:
+
+```c
+#if !defined(HEADLESS) && !defined(MACOSX)
+```
+
+`-DHEADLESS=true` is upstream's own answer, and it is already passed to
+`libawt_headless`. It is never passed to `libawt`, because every other unix
+has Xlib headers on hand whether the build is headless or not. Android does
+not, so `libawt` gets it too. Confirmed with `clang -H`: `awt.h` pulls Xlib
+in once without it and not at all with it. Neither `awtImageData` nor
+`XPixmapFormatValues`, the types those guards hide, is used by any source
+built here.
+
+`libawt_headless` then needed two exclusions of its own:
+
+- `unix/native/common/java2d/x11` and `.../java2d/opengl`. Every `.c` in both
+  is wrapped in a single `#ifndef HEADLESS` running from its first
+  declaration to its last, so with HEADLESS set they already compile to empty
+  objects on linux - but their `#include` lines sit *above* that guard and
+  reach `X11/Xlib.h` and `J2D_GL/glx.h` unconditionally. Dropping the two
+  directories produces exactly what a headless build produces, nothing, and
+  needs no headers to do it. The *shared* `java2d/opengl` sources guard from
+  their first line and are left alone - checked, and checked again by running
+  the real `EXCLUDES` filter over a sample file list to confirm the absolute
+  paths do not over-match the shared tree.
+- `CUPSfuncs.c`, the only file in the whole tree that includes
+  `<cups/cups.h>`, and it does so unconditionally. There is no CUPS on
+  Android and none is configured. The printer-discovery natives go with it;
+  `fontpath.c` was fine to keep, since it looks fontconfig up by `dlopen` and
+  never includes its headers.
+
 ## The serviceability agent is not shipped
 
 `jdk.hotspot.agent` failed on `prstatus_t`, one of glibc's `<sys/procfs.h>`

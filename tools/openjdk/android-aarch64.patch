@@ -528,7 +528,7 @@ index be1ac3f1f..44f37d85c 100644
    LIBJSOUND_CFLAGS := \
        $(ALSA_CFLAGS) \
 diff --git a/make/modules/java.desktop/lib/Awt2dLibraries.gmk b/make/modules/java.desktop/lib/Awt2dLibraries.gmk
-index 341575483..49bafa895 100644
+index 341575483..fd7f51024 100644
 --- a/make/modules/java.desktop/lib/Awt2dLibraries.gmk
 +++ b/make/modules/java.desktop/lib/Awt2dLibraries.gmk
 @@ -77,7 +77,7 @@ ifeq ($(call isTargetOs, windows), true)
@@ -540,6 +540,60 @@ index 341575483..49bafa895 100644
    LIBAWT_EXFILES += awt_Font.c CUPSfuncs.c fontpath.c X11Color.c
  endif
  
+@@ -110,6 +110,18 @@ LIBAWT_CFLAGS += -D__MEDIALIB_OLD_NAMES -D__USE_J2D_NAMES $(X_CFLAGS)
+ 
+ LIBAWT_CFLAGS += -DMLIB_NO_LIBSUNMATH
+ 
++ifeq ($(call isTargetOs, android), true)
++  # There is no Xlib on this platform at all, not even headers. awt.h, color.h
++  # and img_util_md.h each guard their X11 include and X11-only structs with
++  # !defined(HEADLESS) && !defined(MACOSX), which is precisely this situation;
++  # upstream only ever passes it to libawt_headless because every other unix
++  # has Xlib on hand. Shared java2d reaches awt.h through
++  # BufImgSurfaceData.c -> img_util_md.h -> color.h, so without this the
++  # rasterizer does not compile. None of the types the guards hide -
++  # awtImageData, XPixmapFormatValues - is used by a source built here.
++  LIBAWT_CFLAGS += -DHEADLESS=true
++endif
++
+ ifeq ($(call isTargetOs, windows), true)
+   LIBAWT_CFLAGS += -EHsc -DUNICODE -D_UNICODE
+   ifeq ($(call isTargetCpuBits, 64), true)
+@@ -381,6 +393,26 @@ ifeq ($(call isTargetOs, windows macosx), false)
+ 
+   LIBAWT_HEADLESS_EXCLUDES := medialib
+ 
++  ifeq ($(call isTargetOs, android), true)
++    # Every .c in these two directories is wrapped in a single
++    # #ifndef HEADLESS from its first declaration to its last, so with
++    # HEADLESS set they already compile to empty objects on linux. Their
++    # #includes, however, sit above that guard and reach X11/Xlib.h and
++    # J2D_GL/glx.h unconditionally. Dropping the directories produces exactly
++    # what a headless build produces - nothing - without needing the headers.
++    # The shared java2d/opengl sources are guarded from their first line and
++    # are left alone.
++    LIBAWT_HEADLESS_EXCLUDES += \
++        $(TOPDIR)/src/$(MODULE)/$(OPENJDK_TARGET_OS_TYPE)/native/common/java2d/x11 \
++        $(TOPDIR)/src/$(MODULE)/$(OPENJDK_TARGET_OS_TYPE)/native/common/java2d/opengl \
++        #
++
++    # The only file in the tree that includes <cups/cups.h>, and it does so
++    # unconditionally. There is no CUPS on Android and none is configured, so
++    # the printer-discovery natives go with it.
++    LIBAWT_HEADLESS_EXCLUDE_FILES += CUPSfuncs.c
++  endif
++
+   LIBAWT_HEADLESS_EXTRA_HEADER_DIRS := \
+       $(LIBAWT_DEFAULT_HEADER_DIRS) \
+       common/awt/debug \
+@@ -395,6 +427,7 @@ ifeq ($(call isTargetOs, windows macosx), false)
+       NAME := awt_headless, \
+       EXTRA_SRC := $(LIBAWT_HEADLESS_EXTRA_SRC), \
+       EXCLUDES := $(LIBAWT_HEADLESS_EXCLUDES), \
++      EXCLUDE_FILES := $(LIBAWT_HEADLESS_EXCLUDE_FILES), \
+       OPTIMIZATION := LOW, \
+       CFLAGS := $(CFLAGS_JDKLIB) \
+           $(LIBAWT_HEADLESS_CFLAGS), \
 diff --git a/src/hotspot/os/linux/os_linux.cpp b/src/hotspot/os/linux/os_linux.cpp
 index a163b8648..906d36aae 100644
 --- a/src/hotspot/os/linux/os_linux.cpp
