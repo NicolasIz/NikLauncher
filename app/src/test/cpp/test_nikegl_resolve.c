@@ -95,15 +95,55 @@ static void test_absent_library(void) {
     check(nikegl_last_error() != NULL, "and leaves an error to report");
 }
 
+/*
+ * The dependency chain, which is the whole reason preloading exists.
+ *
+ * `chain/libEGL.so` needs libmid, which needs libbase, and none of them is on
+ * any search path the loader knows - exactly the shape of a runtime pack in
+ * the app's files directory. Opening the target alone must fail; opening it
+ * after the siblings are loaded must succeed. The chain is three deep and
+ * built in the wrong alphabetical order on purpose, so a single pass over the
+ * directory is not enough and the repeated passes are actually exercised.
+ */
+static void test_preloads_a_chain(const char *chained_egl) {
+    printf("a library whose dependencies are only in its own directory\n");
+
+    check(nikegl_open(chained_egl) == NULL,
+          "does not open on its own: its dependencies are not findable");
+
+    int loaded = nikegl_preload_siblings(chained_egl);
+    check(loaded == 2, "loads both siblings, in whatever order they need");
+
+    void *handle = nikegl_open(chained_egl);
+    check(handle != NULL, "opens once the chain is loaded");
+    if (handle == NULL) return;
+
+    void *slots[COUNT] = {0};
+    check(nikegl_resolve(handle, NAMES, slots, COUNT) == -1,
+          "and every entry point still resolves through it");
+    nikegl_close(handle);
+}
+
+static void test_preload_of_a_bare_name(void) {
+    printf("a bare soname\n");
+    check(nikegl_preload_siblings("libEGL.so") == 0,
+          "loads nothing: that is the platform's own and the loader finds it");
+    check(nikegl_preload_siblings(NULL) == 0, "NULL is not a crash");
+    check(nikegl_preload_siblings("/nonexistent-directory/libEGL.so") == 0,
+          "a directory that is not there loads nothing");
+}
+
 int main(int argc, char **argv) {
-    if (argc < 3) {
-        printf("usage: %s <complete.so> <incomplete.so>\n", argv[0]);
+    if (argc < 4) {
+        printf("usage: %s <complete.so> <incomplete.so> <chained-egl.so>\n", argv[0]);
         return 2;
     }
     test_library_name();
     test_resolves_all(argv[1]);
     test_reports_the_missing_one(argv[2]);
     test_absent_library();
+    test_preloads_a_chain(argv[3]);
+    test_preload_of_a_bare_name();
 
     if (failures > 0) {
         printf("\n%d check(s) failed\n", failures);
