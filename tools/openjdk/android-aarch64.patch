@@ -527,7 +527,7 @@ index be1ac3f1f..44f37d85c 100644
    LIBJSOUND_CFLAGS := \
        $(ALSA_CFLAGS) \
 diff --git a/make/modules/java.desktop/lib/Awt2dLibraries.gmk b/make/modules/java.desktop/lib/Awt2dLibraries.gmk
-index 341575483..71ba8ecf1 100644
+index 341575483..7677f97a7 100644
 --- a/make/modules/java.desktop/lib/Awt2dLibraries.gmk
 +++ b/make/modules/java.desktop/lib/Awt2dLibraries.gmk
 @@ -77,7 +77,7 @@ ifeq ($(call isTargetOs, windows), true)
@@ -580,6 +580,21 @@ index 341575483..71ba8ecf1 100644
    LIBAWT_HEADLESS_EXTRA_HEADER_DIRS := \
        $(LIBAWT_DEFAULT_HEADER_DIRS) \
        common/awt/debug \
+@@ -529,7 +556,13 @@ ifeq ($(call isTargetOs, windows), true)
+   LIBFONTMANAGER_EXCLUDE_FILES += X11FontScaler.c \
+       X11TextRenderer.c
+   LIBFONTMANAGER_OPTIMIZATION := HIGHEST
+-else ifeq ($(call isTargetOs, macosx), true)
++else ifeq ($(call isTargetOs, macosx android), true)
++  # These two are paired with the Java-side exclusions in Java.gmk. Both
++  # platforms drop unix/classes/sun/font/*.java, so sun_font_NativeFont.h and
++  # sun_font_X11TextRenderer.h are never generated, and the C files that
++  # include them cannot compile. macOS has always excluded both halves; the
++  # android port has to do the same or it excludes only the classes and then
++  # fails on the generated header that no longer exists.
+   LIBFONTMANAGER_EXCLUDE_FILES += X11FontScaler.c \
+       X11TextRenderer.c \
+       fontpath.c \
 diff --git a/src/hotspot/os/linux/os_linux.cpp b/src/hotspot/os/linux/os_linux.cpp
 index a163b8648..906d36aae 100644
 --- a/src/hotspot/os/linux/os_linux.cpp
