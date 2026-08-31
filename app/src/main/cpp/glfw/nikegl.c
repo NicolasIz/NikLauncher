@@ -1,6 +1,7 @@
 #include "nikegl.h"
 
 #include "nikegl_resolve.h"
+#include "../loader/niksoload.h"
 
 #include <stddef.h>
 #include <stdio.h>
@@ -66,8 +67,10 @@ int nikegl_load(const char *path) {
      * Both cost nothing for the platform's own libEGL, which is named rather
      * than pathed.
      */
-    nikegl_preload_compat(name);
-    nikegl_preload_siblings(name);
+    /* RTLD_LOCAL: a pack's graphics symbols must not be published where the
+     * system driver's are already bound. */
+    niksoload_compat(name, 0);
+    niksoload_siblings(name, 0);
 
     void *handle = nikegl_open(name);
     if (handle == NULL) {

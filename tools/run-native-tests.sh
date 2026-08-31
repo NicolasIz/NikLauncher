@@ -103,10 +103,28 @@ SRC
   "$out/compat_marker.c" -Wl,-soname,libnik_absent.so \
   -o "$chain/compat/libnik_absent.so"
 
+# A JDK's layout: libjvm.so in lib/server/, the C++ runtime one level up in
+# lib/. This is the arrangement the runtime pack actually has, and the one a
+# sibling-only scan would miss.
+mkdir -p "$out/jdk/lib/server"
+cat > "$out/cxx.c" <<'SRC'
+int nik_cxx_value(void) { return 3; }
+SRC
+cat > "$out/jvm.c" <<'SRC'
+int nik_cxx_value(void);
+int JNI_CreateJavaVM(void) { return nik_cxx_value(); }
+SRC
+"$cc" -std=c11 -Wall -Wextra -Werror -O0 -fPIC -shared \
+  "$out/cxx.c" -Wl,-soname,libnik_cxx_shared.so -o "$out/jdk/lib/libnik_cxx_shared.so"
+"$cc" -std=c11 -Wall -Wextra -Werror -O0 -fPIC -shared \
+  "$out/jvm.c" -Wl,-soname,libjvm.so -o "$out/jdk/lib/server/libjvm.so" \
+  -L "$out/jdk/lib" -l:libnik_cxx_shared.so -Wl,--no-as-needed
+
 echo "Building the EGL resolver test"
 "$cc" "${flags[@]}" \
   "$root/app/src/test/cpp/test_nikegl_resolve.c" \
   "$root/app/src/main/cpp/glfw/nikegl_resolve.c" \
+  "$root/app/src/main/cpp/loader/niksoload.c" \
   -ldl -o "$out/test_nikegl_resolve"
 
 # The stand-in platform library is reachable by bare soname only because it is
@@ -114,4 +132,4 @@ echo "Building the EGL resolver test"
 # position a real platform library is in on a device.
 LD_LIBRARY_PATH="$out/fakeplatform" \
   "$out/test_nikegl_resolve" "$out/libegl_complete.so" "$out/libegl_incomplete.so" \
-  "$chain/libEGL.so"
+  "$chain/libEGL.so" "$out/jdk/lib/server/libjvm.so"

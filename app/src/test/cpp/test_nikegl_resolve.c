@@ -10,6 +10,7 @@
  */
 
 #include "../../main/cpp/glfw/nikegl_resolve.h"
+#include "../../main/cpp/loader/niksoload.h"
 
 #include <dlfcn.h>
 #include <stdio.h>
@@ -112,7 +113,7 @@ static void test_preloads_a_chain(const char *chained_egl) {
     check(nikegl_open(chained_egl) == NULL,
           "does not open on its own: its dependencies are not findable");
 
-    int loaded = nikegl_preload_siblings(chained_egl);
+    int loaded = niksoload_siblings(chained_egl, 0);
     check(loaded == 2, "loads both siblings, in whatever order they need");
 
     void *handle = nikegl_open(chained_egl);
@@ -127,10 +128,10 @@ static void test_preloads_a_chain(const char *chained_egl) {
 
 static void test_preload_of_a_bare_name(void) {
     printf("a bare soname\n");
-    check(nikegl_preload_siblings("libEGL.so") == 0,
+    check(niksoload_siblings("libEGL.so", 0) == 0,
           "loads nothing: that is the platform's own and the loader finds it");
-    check(nikegl_preload_siblings(NULL) == 0, "NULL is not a crash");
-    check(nikegl_preload_siblings("/nonexistent-directory/libEGL.so") == 0,
+    check(niksoload_siblings(NULL, 0) == 0, "NULL is not a crash");
+    check(niksoload_siblings("/nonexistent-directory/libEGL.so", 0) == 0,
           "a directory that is not there loads nothing");
 }
 
@@ -149,7 +150,7 @@ static void test_preload_of_a_bare_name(void) {
 static void test_compat_prefers_the_platform(const char *chained_egl) {
     printf("compatibility libraries\n");
 
-    int loaded = nikegl_preload_compat(chained_egl);
+    int loaded = niksoload_compat(chained_egl, 0);
     check(loaded == 1, "loads only the one the platform does not provide");
 
     /*
@@ -178,15 +179,43 @@ static void test_compat_prefers_the_platform(const char *chained_egl) {
 
 static void test_compat_without_a_directory(const char *plain_egl) {
     printf("a pack with no compatibility directory\n");
-    check(nikegl_preload_compat(plain_egl) == 0,
+    check(niksoload_compat(plain_egl, 0) == 0,
           "loads nothing, and is not an error: older packs carry none");
-    check(nikegl_preload_compat("libEGL.so") == 0, "a bare soname has no pack");
-    check(nikegl_preload_compat(NULL) == 0, "NULL is not a crash");
+    check(niksoload_compat("libEGL.so", 0) == 0, "a bare soname has no pack");
+    check(niksoload_compat(NULL, 0) == 0, "NULL is not a crash");
+}
+
+/*
+ * A JDK's shape, which is not a pack's: libjvm.so sits in lib/server/ and the
+ * C++ runtime it needs sits one level up in lib/. Loading only the siblings
+ * would miss it, and libjvm.so is the first thing the launcher opens - so a
+ * gap here is a gap for every version and every graphics backend.
+ */
+static void test_a_jdk_layout(const char *jdk_libjvm) {
+    printf("a JDK, whose C++ runtime is a directory above libjvm\n");
+
+    check(nikegl_open(jdk_libjvm) == NULL,
+          "libjvm does not open on its own: the C++ runtime is not findable");
+
+    /* lib/server/ holds nothing else, which is exactly why lib/ is needed. */
+    niksoload_siblings(jdk_libjvm, 1);
+    char parent[512];
+    const char *slash = strrchr(jdk_libjvm, '/');
+    const char *up = slash;
+    while (up > jdk_libjvm && *(up - 1) != '/') up--;
+    snprintf(parent, sizeof(parent), "%.*s", (int) (up - 1 - jdk_libjvm), jdk_libjvm);
+    check(niksoload_directory(parent, NULL, 1) == 1,
+          "the directory above yields the one library that can load");
+
+    void *handle = nikegl_open(jdk_libjvm);
+    check(handle != NULL, "and then libjvm opens");
+    if (handle != NULL) nikegl_close(handle);
 }
 
 int main(int argc, char **argv) {
-    if (argc < 4) {
-        printf("usage: %s <complete.so> <incomplete.so> <chained-egl.so>\n", argv[0]);
+    if (argc < 5) {
+        printf("usage: %s <complete.so> <incomplete.so> <chained-egl.so> <jdk-libjvm.so>\n",
+               argv[0]);
         return 2;
     }
     test_library_name();
@@ -197,6 +226,7 @@ int main(int argc, char **argv) {
     test_compat_without_a_directory(argv[1]);
     test_preloads_a_chain(argv[3]);
     test_preload_of_a_bare_name();
+    test_a_jdk_layout(argv[4]);
 
     if (failures > 0) {
         printf("\n%d check(s) failed\n", failures);

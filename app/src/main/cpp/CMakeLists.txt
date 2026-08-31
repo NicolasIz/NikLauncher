@@ -25,7 +25,9 @@ target_link_libraries(nikprobe ${log-lib})
 # through the JNI Invocation API, which is the only way to run a downloaded
 # Java runtime on Android: exec()ing a binary from the app data directory is
 # forbidden.
-add_library(nikjvm SHARED nikjvm.c)
+# niksoload.c is shared with the GLFW bridge: both open a downloaded library
+# by absolute path, and both would fail on its dependencies without it.
+add_library(nikjvm SHARED nikjvm.c loader/niksoload.c)
 target_link_options(nikjvm PRIVATE "-Wl,-z,max-page-size=16384")
 target_link_libraries(nikjvm ${log-lib})
 
@@ -40,6 +42,7 @@ add_library(glfw SHARED
     glfw/nikglfw_jni.c
     glfw/nikegl.c
     glfw/nikegl_resolve.c
+    loader/niksoload.c
 )
 
 target_link_options(glfw PRIVATE "-Wl,-z,max-page-size=16384")

@@ -14,9 +14,12 @@
  * own process.
  */
 
+#include "loader/niksoload.h"
+
 #include <jni.h>
 #include <android/log.h>
 #include <dlfcn.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -99,6 +102,28 @@ Java_com_niklauncher_app_runtime_JvmBridge_nativeRedirectOutput(
  * point is one the user has to be told about, and "the game did not start" is
  * not a diagnosis.
  */
+/*
+ * The directory above the one holding `path` - lib/ for a libjvm.so in
+ * lib/server/. That is where the pack puts the C++ runtime, and where the
+ * JDK's own libraries live. Returns 0 when there is no such directory, which
+ * is not an error: a pack laid out differently simply has nothing to preload
+ * from there, and the open reports whatever actually goes wrong.
+ */
+static int parent_library_directory(const char *path, char *out, size_t size) {
+    const char *last = strrchr(path, '/');
+    if (last == NULL || last == path) return 0;
+
+    const char *parent = last - 1;
+    while (parent > path && *parent != '/') parent--;
+    if (*parent != '/' || parent == path) return 0;
+
+    size_t length = (size_t) (parent - path);
+    if (length == 0 || length >= size) return 0;
+    memcpy(out, path, length);
+    out[length] = '\0';
+    return 1;
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_niklauncher_app_runtime_JvmBridge_nativeCreateJvm(
         JNIEnv *env, jobject thiz, jstring j_libjvm_path, jobjectArray j_options) {
@@ -112,6 +137,29 @@ Java_com_niklauncher_app_runtime_JvmBridge_nativeCreateJvm(
     char *libjvm_path = dup_java_string(env, j_libjvm_path);
     if (libjvm_path == NULL) {
         return (*env)->NewStringUTF(env, "Could not read the libjvm path");
+    }
+
+    /*
+     * The pack's own libraries first, or the open below fails on the C++
+     * runtime. libjvm.so is linked against libc++_shared.so, which the pack
+     * ships in the JDK's lib/ - a directory the app's linker namespace does
+     * not search, and one that an LD_LIBRARY_PATH set from here cannot add,
+     * because Bionic reads that variable once at process start. A library
+     * already loaded under its soname is found before any path is searched.
+     *
+     * lib/ as well as lib/server/, since libjvm.so lives in the latter and
+     * the C++ runtime in the former; libjimage and libfontmanager need it
+     * too, and the VM opens those itself later on.
+     *
+     * RTLD_GLOBAL, unlike the graphics pack: these have to satisfy libraries
+     * the VM opens after this point, not just libjvm.so. Most of lib/ will
+     * not load here at all - the JDK's own libraries need libjvm.so, which is
+     * still to come - and that is expected and harmless.
+     */
+    niksoload_siblings(libjvm_path, 1);
+    char jdk_lib[PATH_MAX];
+    if (parent_library_directory(libjvm_path, jdk_lib, sizeof(jdk_lib))) {
+        niksoload_directory(jdk_lib, NULL, 1);
     }
 
     dlerror();
