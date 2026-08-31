@@ -203,6 +203,26 @@ jobs:
           git clone --depth 1 --branch "$LWJGL_REF" https://github.com/LWJGL/lwjgl3.git upstream-lwjgl
           echo "Building LWJGL $LWJGL_REF at $(git -C upstream-lwjgl rev-parse --short HEAD)"
 
+      # LWJGL is compiled against the NDK's jni.h but runs against the desktop
+      # HotSpot inside the runtime pack, so every (*env)->Function() call takes
+      # its offset from one header and dispatches through a table built by the
+      # other. Checked here, where both headers actually exist, so an NDK or JDK
+      # bump fails the build rather than misdispatching at runtime.
+      - name: Check the JNI table layouts agree
+        run: |
+          set -euo pipefail
+          ndk_jni=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/jni.h
+
+          # This job installs no JDK of its own, so take JAVA_HOME when the
+          # runner exports one and fall back to whatever is on the image.
+          host_jni=${JAVA_HOME:-}/include/jni.h
+          if [ ! -f "$host_jni" ]; then
+            host_jni=$(find /usr/lib/jvm -name jni.h -path '*/include/jni.h' | sort | tail -1)
+          fi
+          echo "android: $ndk_jni"
+          echo "desktop: $host_jni"
+          python3 tools/lwjgl/check-jni-layout.py "$ndk_jni" "$host_jni"
+
       - name: Configure
         run: |
           set -euo pipefail
