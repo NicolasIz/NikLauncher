@@ -13,7 +13,7 @@ class RuntimePackLayoutTest {
 
     private fun pack(graphicsDirectory: String = RuntimePack.DEFAULT_GRAPHICS_DIRECTORY) = RuntimePack(
         id = "openjdk21",
-        runtimeId = "java21",
+        runtimeId = "jre21",
         version = "21.0.12",
         url = "https://example.invalid/pack.tar.gz",
         graphicsDirectory = graphicsDirectory,

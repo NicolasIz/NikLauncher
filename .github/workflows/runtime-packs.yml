@@ -800,7 +800,7 @@ jobs:
           cat > out/jdk/component.json <<JSON
           {
             "id": "openjdk",
-            "runtimeId": "java21",
+            "runtimeId": "jre21",
             "upstream": "https://github.com/openjdk/jdk21u",
             "upstreamRef": "${OPENJDK_REF}",
             "license": "GPL-2.0-with-classpath-exception",
@@ -893,7 +893,7 @@ jobs:
         id: package
         run: |
           set -euo pipefail
-          name="nikruntime-java21-${ANDROID_ABI}.tar.gz"
+          name="nikruntime-jre21-${ANDROID_ABI}.tar.gz"
           # -C stage . so the archive's entries are the pack's own root: the
           # launcher extracts into one directory and expects no wrapper.
           tar -czf "$name" -C stage .
@@ -946,8 +946,8 @@ jobs:
             "schemaVersion": 1,
             "packs": [
               {
-                "id": "nikruntime-java21-${ANDROID_ABI}",
-                "runtimeId": "java21",
+                "id": "nikruntime-jre21-${ANDROID_ABI}",
+                "runtimeId": "jre21",
                 "version": "${version}",
                 "abi": "${ANDROID_ABI}",
                 "url": "${base}/${{ steps.package.outputs.name }}",
@@ -970,7 +970,7 @@ jobs:
         with:
           name: runtime-pack-${{ env.ANDROID_ABI }}
           path: |
-            nikruntime-java21-*.tar.gz
+            nikruntime-jre21-*.tar.gz
             runtime-packs.json
           if-no-files-found: error
 
