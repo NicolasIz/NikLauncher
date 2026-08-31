@@ -389,7 +389,9 @@ jobs:
             -Dnouveau=disabled -Dvmwgfx=disabled -Dfreedreno=disabled \
             -Dvc4=disabled -Detnaviv=disabled \
             -Dcairo-tests=disabled -Dman-pages=disabled \
-            -Dvalgrind=disabled -Dtests=false
+            -Dvalgrind=disabled -Dtests=false \
+            -Dc_link_args=-Wl,-z,max-page-size=16384 \
+            -Dcpp_link_args=-Wl,-z,max-page-size=16384
           meson compile -C upstream-drm/build-android
           meson install -C upstream-drm/build-android
 
@@ -433,8 +435,14 @@ jobs:
           echo "===== every shared object Mesa produced ====="
           find upstream-mesa/build-android -name '*.so*' -type f | sort
 
+          # src/android_stub is deliberately excluded. android-stub=true builds
+          # fake liblog, libcutils, libhardware, libnativewindow and libsync so
+          # Mesa can link without an AOSP tree. They are link-time placeholders;
+          # the device has the real ones. Shipping the stubs would put
+          # non-functional implementations ahead of the platform's own.
           mkdir -p out/mesa
           find upstream-mesa/build-android -name '*.so' -type f \
+            -not -path '*/android_stub/*' \
             -exec cp -v {} out/mesa/ \;
           cp -v "$GITHUB_WORKSPACE/android-deps/lib/libdrm.so" out/mesa/ 2>/dev/null || true
 
