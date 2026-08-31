@@ -885,6 +885,23 @@ jobs:
             rm -f "$stage/nikgraphics/$backend/component.json"
           done
 
+          # libjvm.so, libjimage.so, libfontmanager.so and Mesa's
+          # libgallium_dri.so all link against the NDK's C++ runtime, and
+          # Android ships no copy an app is allowed to open. Without this the
+          # very first dlopen fails and nothing else in the stack gets a turn.
+          # In lib/ for the JDK, and in each backend directory for the same
+          # reason the LWJGL natives are: those directories have to stand alone.
+          ndk=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64
+          libcxx=$(find "$ndk" -name 'libc++_shared.so' -path '*aarch64-linux-android*' | head -n 1)
+          if [ -z "$libcxx" ]; then
+            echo "no libc++_shared.so in the NDK" >&2
+            exit 1
+          fi
+          cp -v "$libcxx" "$stage/lib/"
+          for backend in zink gl4es; do
+            cp "$libcxx" "$stage/nikgraphics/$backend/"
+          done
+
           echo "staged:"
           du -sh "$stage"
           ls "$stage/nikgraphics/zink" "$stage/nikgraphics/gl4es"
@@ -933,6 +950,58 @@ jobs:
           fi
           echo "archive layout matches the manifest"
 
+      - name: Check every dependency resolves somewhere
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, subprocess, collections, sys
+
+          # What the NDK documents as available to an app at runtime. Anything
+          # else has to be inside the pack: Android's linker refuses a
+          # platform-internal library to an app, so "it exists in /system" is
+          # not the same as "we can open it".
+          SYSTEM = {
+              "libc.so", "libm.so", "libdl.so", "liblog.so", "libandroid.so",
+              "libz.so", "libEGL.so", "libGLESv1_CM.so", "libGLESv2.so",
+              "libGLESv3.so", "libvulkan.so", "libjnigraphics.so",
+              "libnativewindow.so", "libsync.so", "libOpenSLES.so",
+              "libaaudio.so", "libmediandk.so", "libcamera2ndk.so",
+              "libneuralnetworks.so", "libstdc++.so",
+          }
+
+          # Known and accepted, with what it costs. Mesa's Android platform
+          # reaches gralloc through these two, which are not public NDK
+          # libraries; they were stubbed at link time. Zink therefore cannot
+          # load on a device yet, which is why the index below does not offer
+          # it. gl4es needs neither and is unaffected.
+          ACCEPTED = {"libcutils.so", "libhardware.so"}
+
+          present = {}
+          for root, _, files in os.walk("stage"):
+              for f in files:
+                  if f.endswith(".so"):
+                      present.setdefault(f, os.path.join(root, f))
+
+          missing = collections.defaultdict(list)
+          for name, path in sorted(present.items()):
+              out = subprocess.run(["readelf", "-dW", path], capture_output=True, text=True).stdout
+              for line in out.splitlines():
+                  if "(NEEDED)" in line:
+                      dep = line.split("[")[1].split("]")[0]
+                      if dep not in SYSTEM and dep not in present:
+                          missing[dep].append(name)
+
+          print("%d shared objects in the pack" % len(present))
+          unexpected = {d: u for d, u in missing.items() if d not in ACCEPTED}
+          for dep, users in sorted(missing.items()):
+              mark = "accepted" if dep in ACCEPTED else "UNRESOLVED"
+              print("  %-10s %-22s needed by %s" % (mark, dep, ", ".join(sorted(users)[:4])))
+          if unexpected:
+              print("\na dependency resolving nowhere fails the dlopen on the device", file=sys.stderr)
+              sys.exit(1)
+          print("every dependency resolves, or is a known accepted gap")
+          PY
+
       - name: Write the pack index
         run: |
           set -euo pipefail
@@ -955,7 +1024,7 @@ jobs:
                 "size": ${{ steps.package.outputs.size }},
                 "libjvmPath": "lib/server/libjvm.so",
                 "providedClasspath": [],
-                "graphicsBackendIds": ["zink", "gl4es"],
+                "graphicsBackendIds": ["gl4es"],
                 "graphicsDirectory": "nikgraphics",
                 "maxPageSizeBytes": 16384
               }
