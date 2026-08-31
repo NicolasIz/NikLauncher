@@ -13,7 +13,7 @@ on:
         type: boolean
         default: false
       probe_openjdk:
-        description: "Configure OpenJDK for Android without building (scaffolding)"
+        description: "Configure OpenJDK for Android without building"
         type: boolean
         default: false
 
@@ -42,11 +42,12 @@ env:
   MESA_REF: "mesa-25.1.5"
   LIBDRM_REF: "libdrm-2.4.124"
 
-  # The OpenJDK Mobile Project. Its Android support is small - 21 lines across
-  # 14 files, only two of them source - because platform.m4 maps android onto
-  # HOTSPOT_OS=linux and lets HotSpot's linux code compile against Bionic.
-  # Pinned to the commit that was read, not to master.
-  OPENJDK_REF: c1ed06aaef34c8dccf71e236d1ffa20918a77cfb
+  # JDK 21, not the Mobile Project's own branch. Mobile carries the Android
+  # support but only on master, currently JDK 28, where sun.misc.Unsafe's memory
+  # accessors are marked for removal - and Minecraft, its mod loaders and
+  # LWJGL's MemoryUtil all lean on those. So the Android support is ported onto
+  # 21u instead, which is the version the game actually expects.
+  OPENJDK_REF: jdk-21.0.12+8
 
 jobs:
   gl4es:
@@ -525,24 +526,20 @@ jobs:
           path: out/mesa-zink-*.tar.gz*
           if-no-files-found: error
 
-  # Scaffolding, not a build.
+  # OpenJDK 21 for Android arm64, from upstream plus a patch this project owns.
   #
-  # OpenJDK is the last missing component and the one most likely not to work.
-  # The OpenJDK Mobile Project carries Android support in tree, and it is
-  # small: platform.m4 maps android onto HOTSPOT_OS=linux, so HotSpot's linux
-  # sources compile against Bionic, and the rest is a handful of accommodations.
+  # The OpenJDK Mobile Project has Android support in tree, but only on master,
+  # which is JDK 28 - a development tip where sun.misc.Unsafe's memory accessors
+  # carry @Deprecated(forRemoval=true). Minecraft, Fabric, Forge and LWJGL's own
+  # MemoryUtil all use exactly those, so a stability-first launcher should not
+  # ship it. tools/openjdk/android-aarch64.patch carries the same support onto
+  # 21u, the version the game expects.
   #
-  # Two things make it uncertain rather than routine. The build defines both
-  # -DLINUX and -D_ALLBSD_SOURCE and puts os/linux and os/bsd on the include
-  # path at once, which is a hybrid no other target uses. And the project's
-  # only branch is master, currently JDK 28 - a development tip, where
-  # sun.misc.Unsafe's memory accessors are marked for removal and Minecraft's
-  # ecosystem targets 17 or 21.
-  #
-  # So this configures and stops, to find out how far the port actually gets
-  # before spending an hour of build time on it.
-  openjdk-probe:
-    name: Probe OpenJDK's Android target
+  # Configure first, behind an input, because it resolves the toolchain and
+  # every dependency in a minute where a full JDK build costs the better part of
+  # an hour. Same discipline that got Mesa right in three cheap rounds.
+  openjdk:
+    name: Build OpenJDK 21 for Android
     if: ${{ inputs.probe_openjdk }}
     runs-on: ubuntu-latest
 
@@ -559,6 +556,7 @@ jobs:
           sdkmanager --install "ndk;${NDK_VERSION}" >/dev/null
           echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
 
+      # A JDK builds with a JDK. 21 builds itself or is built by 21.
       - name: Set up the boot JDK
         uses: actions/setup-java@v4
         with:
@@ -569,27 +567,40 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq autoconf zip unzip build-essential
+          sudo apt-get install -y -qq autoconf zip unzip build-essential file
 
-      - name: Fetch the OpenJDK Mobile Project
+      - name: Fetch OpenJDK 21
         run: |
           set -euo pipefail
-          git clone --filter=blob:none --no-checkout \
-            https://github.com/openjdk/mobile.git upstream-jdk
-          git -C upstream-jdk checkout -q "$OPENJDK_REF"
-          echo "OpenJDK Mobile at $(git -C upstream-jdk rev-parse --short HEAD)"
-          grep -E "^DEFAULT_VERSION_FEATURE" upstream-jdk/make/conf/version-numbers.conf
+          git clone --depth 1 --branch "$OPENJDK_REF" \
+            https://github.com/openjdk/jdk21u.git upstream-jdk
+          echo "OpenJDK $OPENJDK_REF at $(git -C upstream-jdk rev-parse --short HEAD)"
 
-      # Configure only. It resolves the toolchain and every dependency, which is
-      # where a cross-compilation target that does not really work shows itself.
-      - name: Try to configure for aarch64-linux-android
+      # Applied with --check first, so a patch that no longer fits the upstream
+      # tree says so plainly instead of half-applying and failing later in a
+      # way that looks like a compiler problem.
+      - name: Apply the Android patch
+        run: |
+          set -euo pipefail
+          cd upstream-jdk
+          patch_file=$GITHUB_WORKSPACE/tools/openjdk/android-aarch64.patch
+          git apply --check "$patch_file"
+          git apply --stat "$patch_file"
+          git apply "$patch_file"
+          echo "patch applied cleanly"
+
+      - name: Configure for aarch64-linux-android
         id: configure
         continue-on-error: true
         run: |
           set -euo pipefail
           tc=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64
           cd upstream-jdk
-          bash configure \
+          # Captured rather than only streamed: when configure fails before it
+          # creates a build directory there is no config.log to fall back on,
+          # and its own output is the only account of what went wrong.
+          set +e
+          ANDROID_API_LEVEL=${ANDROID_API} bash configure \
             --openjdk-target=aarch64-linux-android \
             --with-boot-jdk="$JAVA_HOME" \
             --with-toolchain-type=clang \
@@ -603,27 +614,30 @@ jobs:
             AR="$tc/bin/llvm-ar" \
             STRIP="$tc/bin/llvm-strip" \
             NM="$tc/bin/llvm-nm" \
-            OBJCOPY="$tc/bin/llvm-objcopy"
+            OBJCOPY="$tc/bin/llvm-objcopy" \
+            > "$GITHUB_WORKSPACE/configure-output.log" 2>&1
+          status=$?
+          set -e
+          exit $status
 
-      # Always reported: on this component the failure is the finding.
-      - name: Report what configure decided
+      - name: Report what configure said
         if: always()
         run: |
           set -euo pipefail
-          cd upstream-jdk
-          if [ -f build/*/config.log ]; then
-            echo "===== tail of config.log ====="
-            tail -100 build/*/config.log
+          if [ -f configure-output.log ]; then
+            echo "===== last 120 lines of configure output ====="
+            tail -120 configure-output.log
           else
-            echo "no config.log was produced"
+            echo "configure produced no output at all"
           fi
-          if [ -f build/*/spec.gmk ]; then
-            echo "===== configure succeeded; key settings ====="
-            grep -E "^(OPENJDK_TARGET_OS|OPENJDK_TARGET_CPU|HOTSPOT_TARGET_OS|CC|CXX|BOOT_JDK) " build/*/spec.gmk | head -20
+          log=$(find upstream-jdk/build -name config.log -print -quit 2>/dev/null || true)
+          if [ -n "$log" ]; then
+            echo "===== tail of $log ====="
+            tail -60 "$log"
           fi
 
       - name: Fail if configure failed
         if: steps.configure.outcome == 'failure'
         run: |
-          echo "OpenJDK's Android target did not configure; see the log above." >&2
+          echo "OpenJDK 21 did not configure for Android; see the output above." >&2
           exit 1
