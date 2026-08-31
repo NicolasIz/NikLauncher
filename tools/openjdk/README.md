@@ -37,13 +37,14 @@ stability first, so the support is ported back to 21u instead.
 | `flags-other.m4` | Same target triple for the assembler |
 | `toolchain.m4` | Skip the build-compiler version probe the NDK clang fails |
 | `lib-freetype.m4` | Use the bundled freetype; there is no system one |
-| `libraries.m4` | No X11, no fontconfig, no CUPS |
+| `libraries.m4` | No X11; fontconfig and CUPS kept as headers only |
 
-`libraries.m4` decides six dependencies in one block. Android needs three
-turned off - X11, fontconfig and CUPS - and the other three already fall out
-correctly: freetype is satisfied by the bundled copy the `lib-freetype.m4` hunk
-selects, ALSA is gated on the target being exactly `xlinux` so android misses
-it, and FFI is only wanted for the `zero` JVM variant.
+`libraries.m4` decides six dependencies in one block. Android needs only X11
+turned off. The other five fall out correctly or are kept deliberately:
+freetype is satisfied by the bundled copy the `lib-freetype.m4` hunk selects,
+ALSA is gated on the target being exactly `xlinux` so android misses it, FFI is
+only wanted for the `zero` JVM variant, and fontconfig and CUPS stay - see
+below, they cost nothing but headers.
 | `spec.gmk.in` | Define `OPENJDK_TARGET_OS_VARIANT` once, for the whole build |
 | `Modules.gmk`, `JdkNativeCompilation.gmk` | Take Java and native sources from the `linux` tree |
 | `GensrcProperties.gmk` | Strip that extra source root back off when deriving a package |
@@ -500,11 +501,38 @@ built here.
   their first line and are left alone - checked, and checked again by running
   the real `EXCLUDES` filter over a sample file list to confirm the absolute
   paths do not over-match the shared tree.
-- `CUPSfuncs.c`, the only file in the whole tree that includes
-  `<cups/cups.h>`, and it does so unconditionally. There is no CUPS on
-  Android and none is configured. The printer-discovery natives go with it;
-  `fontpath.c` was fine to keep, since it looks fontconfig up by `dlopen` and
-  never includes its headers.
+### fontconfig and CUPS cost only headers
+
+Two files include headers for libraries Android does not have:
+`CUPSfuncs.c` needs `<cups/cups.h>`, and `fontpath.c` needs
+`<fontconfig/fontconfig.h>` - the latter at line 386, well down the file,
+which an earlier reading of this port missed and wrongly recorded as
+"never includes its headers".
+
+The first instinct was to exclude both files. That was wrong, and checking
+showed why: **neither library is linked against.** There is no `CUPS_LIBS`
+or `FONTCONFIG_LIBS` anywhere in the JDK's make tree; both `lib-cups.m4` and
+`lib-fontconfig.m4` produce nothing but an `-I` flag. Every entry point in
+both files comes from `dlopen` plus `dlsym`. The headers supply type
+declarations and nothing else, and they are plain C API declarations with no
+architecture in them - `fontconfig.h` includes only `sys/types.h`,
+`sys/stat.h`, `stdarg.h` and `limits.h`.
+
+So the build compiles against them and keeps both files whole. At runtime on
+Android both `dlopen`s fail and return null, which is a case both files
+already handle - it is the same path `--with-fontconfig=no` and
+`USE_J2D_FONTCONFIG=no` produce on a desktop.
+
+That matters for `fontpath.c` in particular. It provides
+`sun.font.FontConfigManager`'s natives, which `SunFontManager` calls while
+initialising on unix - a path that can plausibly run. Excluding it would have
+traded a build error for an `UnsatisfiedLinkError` somewhere much later and
+much harder to read.
+
+The workflow copies the two header directories into a private root and points
+`--with-fontconfig-include` and `--with-cups-include` at it, rather than at
+`/usr/include`: passing the latter would put the host's glibc headers on the
+cross compile's include path ahead of the NDK sysroot.
 
 ## The serviceability agent is not shipped
 

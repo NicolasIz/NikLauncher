@@ -577,7 +577,25 @@ jobs:
           # --with-toolchain-type=clang the buildjdk - the JDK compiled for the
           # host to run build tools - is handed clang-only flags. Giving it gcc
           # makes those flags an error rather than a no-op.
-          sudo apt-get install -y -qq autoconf zip unzip build-essential file clang
+          sudo apt-get install -y -qq autoconf zip unzip build-essential file clang \
+            libfontconfig1-dev libcups2-dev
+
+          # java.desktop compiles against the fontconfig and CUPS headers but
+          # links against neither: both libraries are dlopen'd and every entry
+          # point comes from dlsym, so the headers only supply type
+          # declarations. There is no CUPS_LIBS or FONTCONFIG_LIBS anywhere in
+          # the JDK's make tree - checked - and both headers are plain C API
+          # declarations with no architecture in them.
+          #
+          # They are copied into a private root rather than pointing configure
+          # at /usr/include, which would put the host's glibc headers on the
+          # cross compile's include path ahead of the NDK sysroot.
+          fcinc="$GITHUB_WORKSPACE/host-api-headers"
+          mkdir -p "$fcinc"
+          cp -a /usr/include/fontconfig "$fcinc/"
+          cp -a /usr/include/cups "$fcinc/"
+          echo "HOST_API_HEADERS=$fcinc" >> "$GITHUB_ENV"
+          echo "provided: $(ls "$fcinc")"
 
       - name: Fetch OpenJDK 21
         run: |
@@ -658,6 +676,8 @@ jobs:
             --enable-headless-only \
             --disable-warnings-as-errors \
             --with-native-debug-symbols=none \
+            --with-fontconfig-include="$HOST_API_HEADERS" \
+            --with-cups-include="$HOST_API_HEADERS" \
             --with-extra-ldflags="-Wl,--undefined-version -Wl,-z,max-page-size=16384" \
             CC="$tc/bin/aarch64-linux-android${ANDROID_API}-clang" \
             CXX="$tc/bin/aarch64-linux-android${ANDROID_API}-clang++" \
