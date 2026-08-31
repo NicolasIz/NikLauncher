@@ -39,6 +39,24 @@ index 0af7c02cf..52f063df5 100644
    if test "x$OPENJDK_TARGET_OS" = xmacosx; then
      JVM_BASIC_ASFLAGS="-mno-omit-leaf-frame-pointer -mstack-alignment=16"
  
+diff --git a/make/autoconf/jdk-options.m4 b/make/autoconf/jdk-options.m4
+index 77cba5f2a..fd3df5ad7 100644
+--- a/make/autoconf/jdk-options.m4
++++ b/make/autoconf/jdk-options.m4
+@@ -188,6 +188,13 @@ AC_DEFUN_ONCE([JDKOPT_SETUP_JDK_OPTIONS],
+   if test "x$OPENJDK_TARGET_CPU" = xs390x ; then
+     INCLUDE_SA=false
+   fi
++  if test "x$OPENJDK_TARGET_OS" = xandroid ; then
++    # ps_core.c reads core files through glibc's <sys/procfs.h> types, which
++    # Bionic does not have. Porting them would buy a tool the platform cannot
++    # run anyway: the agent attaches over ptrace or reads a core file, from a
++    # second java process, and an Android app may do none of those things.
++    INCLUDE_SA=false
++  fi
+   AC_SUBST(INCLUDE_SA)
+ 
+   # Setup default CDS alignment. On platforms where one build may run on machines with different
 diff --git a/make/autoconf/lib-freetype.m4 b/make/autoconf/lib-freetype.m4
 index 6a7109342..d0859f36c 100644
 --- a/make/autoconf/lib-freetype.m4
@@ -509,6 +527,19 @@ index be1ac3f1f..44f37d85c 100644
  
    LIBJSOUND_CFLAGS := \
        $(ALSA_CFLAGS) \
+diff --git a/make/modules/java.desktop/lib/Awt2dLibraries.gmk b/make/modules/java.desktop/lib/Awt2dLibraries.gmk
+index 341575483..49bafa895 100644
+--- a/make/modules/java.desktop/lib/Awt2dLibraries.gmk
++++ b/make/modules/java.desktop/lib/Awt2dLibraries.gmk
+@@ -77,7 +77,7 @@ ifeq ($(call isTargetOs, windows), true)
+       #
+ endif
+ 
+-ifeq ($(call isTargetOs, linux macosx aix), true)
++ifeq ($(call isTargetOs, linux macosx aix android), true)
+   LIBAWT_EXFILES += awt_Font.c CUPSfuncs.c fontpath.c X11Color.c
+ endif
+ 
 diff --git a/src/hotspot/os/linux/os_linux.cpp b/src/hotspot/os/linux/os_linux.cpp
 index a163b8648..906d36aae 100644
 --- a/src/hotspot/os/linux/os_linux.cpp
@@ -603,3 +634,26 @@ index 902cf9673..cc7cb6f2a 100644
  #include <netdb.h>
  #include <poll.h>
  #include <sys/socket.h>
+diff --git a/src/java.desktop/unix/native/common/awt/utility/rect.h b/src/java.desktop/unix/native/common/awt/utility/rect.h
+index ceea38f43..120e14beb 100644
+--- a/src/java.desktop/unix/native/common/awt/utility/rect.h
++++ b/src/java.desktop/unix/native/common/awt/utility/rect.h
+@@ -28,11 +28,16 @@
+ #ifndef _AWT_RECT_H
+ #define _AWT_RECT_H
+ 
+-#ifndef MACOSX
++// Region.h includes this header, and every shared java2d source includes
++// Region.h, so on a platform without Xlib the whole rasterizer stops
++// compiling over a rectangle type. Android has no Xlib, and takes the branch
++// macOS already proves works. Nothing here builds or calls
++// BitmapToYXBandedRectangles on either platform - rect.c is only compiled on
++// windows - so RECT_T survives as the type of a prototype and nothing more.
++#if !defined(MACOSX) && !defined(__ANDROID__)
+ #include <X11/Xlib.h>
+ typedef XRectangle RECT_T;
+ #else
+-// OSX still needs this for BitmapToYXBandedRectangles
+ typedef struct {
+     int x;
+     int y;

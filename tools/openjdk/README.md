@@ -61,7 +61,9 @@ java.lang.UnsatisfiedLinkError: 'void sun.nio.ch.FileDispatcherImpl.init0()'
 lives in `linux/native/libnio` and was not, because libraries are found through
 `FindSrcDirsForLib`. The Java and native halves disagreed.
 | `JvmFlags.gmk` | Put the linux and `linux_aarch64` include directories on the path |
-| `java.desktop/*.gmk` | No AWT, no sound |
+| `java.desktop/*.gmk` | No AWT, no sound, and none of the X11 or CUPS sources |
+| `rect.h` | Take the non-Xlib rectangle, as macOS does |
+| `jdk-options.m4` | No serviceability agent, as on AIX and s390x |
 | `JvmMapfile.gmk` | Take the linux symbol-dump branch |
 | `GensrcAdlc.gmk` | Give ADLC the linux OS defines |
 | `JvmOverrideFiles.gmk` | Large-file support and the clang PCH exclusions |
@@ -406,6 +408,74 @@ The release-file one would never have failed the build. It would have shipped.
 Checked by lifting the three generated blocks out of `configure` itself and
 running them for all five OS names: linux, windows and aix are untouched,
 macosx still gives macos/Darwin/darwin, android now gives linux/Linux/linux.
+
+## java2d's rectangle came from Xlib
+
+With the image building, the target's own libraries started compiling, and
+`libawt` stopped on:
+
+```
+rect.h:32:10: fatal error: 'X11/Xlib.h' file not found
+  ... building libawt/Blit.o
+```
+
+Two separate reasons, and the second is the interesting one.
+
+`Awt2dLibraries.gmk` excludes `awt_Font.c`, `CUPSfuncs.c`, `fontpath.c` and
+`X11Color.c` on `linux macosx aix`. Those four are the only `.c` files in
+`unix/native/common/awt`, and two of them include X11 headers directly.
+Android was not in the list, so all four were being compiled.
+
+That alone would not have been enough. `rect.h` reaches for Xlib to name a
+rectangle:
+
+```c
+#ifndef MACOSX
+#include <X11/Xlib.h>
+typedef XRectangle RECT_T;
+#else
+typedef struct { int x; int y; int width; int height; } RECT_T;
+#endif
+```
+
+`Region.h` includes `rect.h`, and every shared java2d source includes
+`Region.h` - so on a platform with no Xlib the entire rasterizer stops
+compiling over a type name. Headless does not help: this is not the windowing
+system, it is `Blit`.
+
+macOS already has a branch that avoids it, which settles both the question of
+whether it works and what the replacement should look like. Android takes the
+same one. It costs nothing here: `BitmapToYXBandedRectangles` is implemented in
+`rect.c`, which is only compiled on windows, and called only from windows code
+and from `libawt_xawt`, which android does not build. `RECT_T` survives as the
+type of a prototype and nothing else.
+
+Verified with `clang -H`, which prints the include tree so an Xlib include
+cannot hide - this machine has X11 headers installed, so a plain "it compiles"
+would have proved nothing:
+
+| | `Xlib.h` included | `RECT_T` |
+| - | - | - |
+| `-D__ANDROID__` | 0 | plain struct |
+| upstream | 1 | `XRectangle` |
+| `-DMACOSX` | 0 | plain struct |
+
+## The serviceability agent is not shipped
+
+`jdk.hotspot.agent` failed on `prstatus_t`, one of glibc's `<sys/procfs.h>`
+core-file types that Bionic does not have.
+
+It is turned off rather than ported, through `INCLUDE_SA`, the switch upstream
+already uses to say "some platforms don't have the serviceability agent" for
+AIX and s390x. This is not a feature dropped to get a green build: the agent
+attaches to a JVM over ptrace or reads a core file, and it does so from a
+second `java` process. An Android app may not ptrace another process and may
+not exec a JVM from its data directory, so a ported agent would compile and
+then never run. Porting glibc's procfs structures to buy that is not a
+trade worth making.
+
+Everything else in the image is unaffected - the agent is a separate module
+and a separate tool, not something the JVM needs to run.
 
 ## Three files the Mobile Project never needed
 
