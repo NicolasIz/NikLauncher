@@ -51,6 +51,14 @@ class LaunchPlanner(
     private val launcherVersion: String = NikLauncher.VERSION,
 ) {
 
+    /**
+     * [bundledLibraryDirectories] are directories outside the pack that also
+     * hold shared objects the game will load - on Android, the launcher's own
+     * native library directory, which is where libglfw.so lives. The pack
+     * cannot carry that one: it implements the GLFW ABI against this
+     * launcher's event core, so it ships in the application, not in a runtime
+     * anyone could swap out.
+     */
     fun plan(
         instance: Instance,
         install: InstallPlan,
@@ -59,6 +67,7 @@ class LaunchPlanner(
         backend: GraphicsBackend,
         account: LaunchAccount,
         display: DisplaySize,
+        bundledLibraryDirectories: List<File> = emptyList(),
     ): PlannedLaunch {
         val graphicsDirectory = File(runtime.home, pack.libraryDirectoryFor(backend))
 
@@ -94,7 +103,9 @@ class LaunchPlanner(
         val command = argumentBuilder.build(
             version = install.version,
             context = context,
-            extraJvmArguments = jvmArguments(instance, graphicsDirectory, backend),
+            extraJvmArguments = jvmArguments(
+                instance, graphicsDirectory, backend, bundledLibraryDirectories,
+            ),
         )
 
         return PlannedLaunch(
@@ -117,12 +128,23 @@ class LaunchPlanner(
         instance: Instance,
         graphicsDirectory: File,
         backend: GraphicsBackend,
+        bundledLibraryDirectories: List<File>,
     ): List<String> = buildList {
         add("-Xmx" + instance.memoryMegabytes + "M")
         // LWJGL loads its own natives through System.loadLibrary before any of
         // its properties are read, so the plain library path has to name the
         // pack directory too, not only org.lwjgl.librarypath.
-        add("-Djava.library.path=" + graphicsDirectory.absolutePath)
+        //
+        // And the launcher's own directory after it, because libglfw.so is
+        // there and nowhere else. org.lwjgl.librarypath names a single
+        // directory, so it cannot cover both; java.library.path is a list and
+        // is the only place the two can be named together. Without this LWJGL
+        // reaches GLFW, finds nothing, and the launch dies just after the VM
+        // has started - on every version and every backend.
+        val searchPath = (listOf(graphicsDirectory) + bundledLibraryDirectories)
+            .map { it.absolutePath }
+            .distinct()
+        add("-Djava.library.path=" + searchPath.joinToString(File.pathSeparator))
         addAll(GraphicsProperties.forBackend(backend, graphicsDirectory.absolutePath))
         addAll(instance.extraJvmArguments)
     }

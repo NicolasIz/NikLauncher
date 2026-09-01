@@ -154,6 +154,10 @@ class GameSession(
             backend = backend,
             account = LaunchAccount.offline(container.settings.settings.first().playerName),
             display = display,
+            // libglfw.so ships in the launcher, not in the pack: it implements
+            // the GLFW ABI against this launcher's own event core. Naming its
+            // directory here is what lets LWJGL find it at all.
+            bundledLibraryDirectories = listOf(File(container.nativeLibraryDir)),
         )
 
         val layout = container.controlLayouts.load()
