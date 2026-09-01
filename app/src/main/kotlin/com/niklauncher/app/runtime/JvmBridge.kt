@@ -24,6 +24,7 @@ object JvmBridge {
     private val loadError: Throwable? = runCatching { System.loadLibrary(LIBRARY_NAME) }.exceptionOrNull()
 
     private external fun nativeRedirectOutput(path: String): String?
+    private external fun nativeSetWorkingDirectory(path: String): String?
     private external fun nativeCreateJvm(libjvmPath: String, options: Array<String>): String?
     private external fun nativeInvokeMain(mainClass: String, args: Array<String>): String?
     private external fun nativeIsRunning(): Boolean
@@ -46,6 +47,7 @@ object JvmBridge {
         command: LaunchCommand,
         environment: Map<String, String> = emptyMap(),
         logFile: File? = null,
+        workingDirectory: File? = null,
     ): Result = withContext(Dispatchers.IO) {
         loadError?.let {
             return@withContext Result.Failed("No se pudo cargar el puente nativo: " + it.message)
@@ -56,6 +58,16 @@ object JvmBridge {
         }
 
         environment.forEach { (key, value) -> setEnvironmentVariable(key, value) }
+
+        // Before the VM, because log4j resolves logs/latest.log the moment
+        // Minecraft's main class is initialised - and a process started
+        // through JNI has no shell to have put it anywhere, so it inherits
+        // "/", which nothing may write to.
+        workingDirectory?.let { directory ->
+            nativeSetWorkingDirectory(directory.absolutePath)?.let {
+                return@withContext Result.Failed(it)
+            }
+        }
 
         // Before the VM: HotSpot reports a failed creation on stderr, and
         // redirecting afterwards would miss exactly the message that explains

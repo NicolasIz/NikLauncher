@@ -29,6 +29,12 @@ data class PlannedLaunch(
     /** Absolute directory holding this backend's shared objects and LWJGL's. */
     val graphicsLibraryDirectory: File,
     /**
+     * Where the game must actually be run from. Minecraft and the libraries
+     * under it open a great many paths relative to the working directory and
+     * never ask where it is, so this is not the same thing as --gameDir.
+     */
+    val gameDirectory: File,
+    /**
      * The `libEGL.so` the GLFW bridge must bind to, or null to use the
      * device's own - which is what the backends that translate to a plain
      * `libGL.so` want.
@@ -112,6 +118,7 @@ class LaunchPlanner(
             command = command,
             backend = backend,
             graphicsLibraryDirectory = graphicsDirectory,
+            gameDirectory = gameDirectory,
             eglLibrary = when (backend) {
                 GraphicsBackend.ZINK -> File(graphicsDirectory, "libEGL.so")
                 GraphicsBackend.GL4ES, GraphicsBackend.LTW -> null

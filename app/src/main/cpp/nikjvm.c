@@ -19,10 +19,13 @@
 #include <jni.h>
 #include <android/log.h>
 #include <dlfcn.h>
+#include <errno.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #define LOG_TAG "NikLauncher"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -315,6 +318,73 @@ Java_com_niklauncher_app_runtime_JvmBridge_nativeSetEnv(
     }
     if (name != NULL) (*env)->ReleaseStringUTFChars(env, j_name, name);
     if (value != NULL) (*env)->ReleaseStringUTFChars(env, j_value, value);
+}
+
+/*
+ * mkdir -p. The instance directory exists, but the game directory under it may
+ * not on a first run, and creating one level at a time is the whole of it.
+ */
+static int mkdir_p(const char *path) {
+    char work[PATH_MAX];
+    size_t length = strlen(path);
+    if (length == 0 || length >= sizeof(work)) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    memcpy(work, path, length + 1);
+
+    for (char *at = work + 1; *at != '\0'; at++) {
+        if (*at != '/') continue;
+        *at = '\0';
+        if (mkdir(work, 0700) != 0 && errno != EEXIST) return -1;
+        *at = '/';
+    }
+    return mkdir(work, 0700);
+}
+
+/*
+ * Moves the process into the directory Minecraft expects to be run from.
+ *
+ * The game writes a great deal relative to the working directory and never
+ * asks where it is: logs/latest.log, options.txt, saves, screenshots,
+ * resourcepacks. Started through JNI there is no shell to have chosen one, so
+ * the process inherits "/" - which is not writable, and the first thing to
+ * find out was log4j, with "Could not create directory /logs" before the game
+ * had drawn anything.
+ *
+ * --gameDir does not cover this. That tells Minecraft where its own data
+ * lives; it does not move the process, and the libraries underneath it that
+ * open relative paths never see it.
+ */
+JNIEXPORT jstring JNICALL
+Java_com_niklauncher_app_runtime_JvmBridge_nativeSetWorkingDirectory(
+        JNIEnv *env, jobject thiz, jstring j_path) {
+    (void) thiz;
+    char message[512];
+
+    char *path = dup_java_string(env, j_path);
+    if (path == NULL) {
+        return (*env)->NewStringUTF(env, "Could not read the working directory");
+    }
+
+    /* Created here rather than assumed: a fresh instance has never been run. */
+    if (mkdir_p(path) != 0 && errno != EEXIST) {
+        snprintf(message, sizeof(message), "Could not create %s: %s",
+                 path, strerror(errno));
+        free(path);
+        return (*env)->NewStringUTF(env, message);
+    }
+
+    if (chdir(path) != 0) {
+        snprintf(message, sizeof(message), "Could not enter %s: %s",
+                 path, strerror(errno));
+        free(path);
+        return (*env)->NewStringUTF(env, message);
+    }
+
+    LOGI("Working directory is %s", path);
+    free(path);
+    return NULL;
 }
 
 JNIEXPORT jboolean JNICALL

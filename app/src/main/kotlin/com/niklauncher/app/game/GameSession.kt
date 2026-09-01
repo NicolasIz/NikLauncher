@@ -199,6 +199,7 @@ class GameSession(
             command = plan.command,
             environment = environment(installed, plan),
             logFile = log,
+            workingDirectory = plan.gameDirectory,
         )
 
         if (result is JvmBridge.Result.Failed) {

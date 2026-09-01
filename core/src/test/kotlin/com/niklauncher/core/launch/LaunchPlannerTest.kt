@@ -278,4 +278,32 @@ class LaunchPlannerTest {
             "the launcher's path must be the last one, or the manifest's wins",
         )
     }
+
+    /**
+     * Minecraft resolves logs/, saves/, options.txt and screenshots against
+     * the working directory, not against --gameDir, and never asks where it
+     * is. Started through JNI there is no shell to have chosen one, so the
+     * process inherits "/" - and the first launch that got this far died on
+     * "Could not create directory /logs" before drawing anything. The planner
+     * carries the directory so the bridge has one to move into.
+     */
+    @Test
+    fun `the plan names the directory the game must run from`() {
+        val planned = plan()
+
+        assertEquals(
+            paths.instanceGameDirectory(instance().id).absolutePath,
+            planned.gameDirectory.absolutePath,
+        )
+    }
+
+    @Test
+    fun `the game directory is the one the game arguments were built with`() {
+        val planned = plan()
+
+        assertTrue(
+            planned.command.gameArguments.contains(planned.gameDirectory.absolutePath),
+            "--gameDir and the working directory must not be able to disagree",
+        )
+    }
 }
