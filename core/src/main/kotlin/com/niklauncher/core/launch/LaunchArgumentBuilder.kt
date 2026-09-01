@@ -48,10 +48,47 @@ class LaunchArgumentBuilder(
             ?: throw IllegalArgumentException("Version ${version.id} declares no mainClass")
 
         return LaunchCommand(
-            jvmArguments = jvm + extraJvmArguments,
+            jvmArguments = forInvocationApi(jvm + extraJvmArguments),
             mainClass = mainClass,
             gameArguments = game,
         )
+    }
+
+    /**
+     * Rewrites the options the JNI Invocation API will not take.
+     *
+     * `-cp` and `-classpath` are not JVM options at all: they belong to the
+     * `java` binary, which translates them into `-Djava.class.path=` before it
+     * ever creates a VM. NikLauncher creates the VM itself and so never runs
+     * that binary, and HotSpot answers a `-cp` in JavaVMInitArgs with
+     * "Unrecognized option: -cp" and refuses to start - which is exactly how
+     * the first launch on a real device died.
+     *
+     * Mojang's manifests emit the flag and its value as two separate entries,
+     * so both have to be consumed together. A flag with nothing after it
+     * cannot mean anything and is dropped.
+     */
+    private fun forInvocationApi(arguments: List<String>): List<String> = buildList {
+        var index = 0
+        while (index < arguments.size) {
+            val argument = arguments[index]
+            when {
+                argument in CLASSPATH_FLAGS -> {
+                    arguments.getOrNull(index + 1)?.let { add(CLASSPATH_PROPERTY + it) }
+                    index += 2
+                }
+
+                CLASSPATH_FLAGS.any { argument.startsWith("$it=") } -> {
+                    add(CLASSPATH_PROPERTY + argument.substringAfter('='))
+                    index++
+                }
+
+                else -> {
+                    add(argument)
+                    index++
+                }
+            }
+        }
     }
 
     private fun expand(
@@ -103,5 +140,14 @@ class LaunchArgumentBuilder(
             index = end + 1
         }
         return out.toString()
+    }
+
+    private companion object {
+        /**
+         * Every spelling the `java` binary accepts, because a manifest is free
+         * to use any of them and all three mean the same thing to it.
+         */
+        val CLASSPATH_FLAGS = setOf("-cp", "-classpath", "--class-path")
+        const val CLASSPATH_PROPERTY = "-Djava.class.path="
     }
 }

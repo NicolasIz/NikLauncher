@@ -46,7 +46,9 @@ class LaunchArgumentBuilderTest {
         val command = builder.build(version, context())
 
         assertEquals(listOf("--username", "Nik", "--version", "1.21.1"), command.gameArguments)
-        assertEquals(listOf("-cp", "/a.jar:/b.jar"), command.jvmArguments)
+        // -cp does not survive: the JNI Invocation API rejects it, so the
+        // builder hands over the property the `java` binary would have made.
+        assertEquals(listOf("-Djava.class.path=/a.jar:/b.jar"), command.jvmArguments)
         assertEquals("net.minecraft.client.main.Main", command.mainClass)
     }
 
@@ -93,7 +95,7 @@ class LaunchArgumentBuilderTest {
         val command = builder.build(version, context())
 
         assertFalse(command.jvmArguments.contains("-XstartOnFirstThread"))
-        assertContains(command.jvmArguments, "-cp")
+        assertContains(command.jvmArguments, "-Djava.class.path=/a.jar:/b.jar")
     }
 
     @Test
@@ -111,7 +113,9 @@ class LaunchArgumentBuilderTest {
 
         assertEquals(listOf("--username", "Nik", "--gameDir", "/data/mc"), command.gameArguments)
         assertContains(command.jvmArguments, "-Djava.library.path=/data/natives")
-        assertContains(command.jvmArguments, "/a.jar:/b.jar")
+        // Synthesised as a property, not as the -cp the vanilla launcher used:
+        // these arguments go to JNI_CreateJavaVM, which takes neither.
+        assertContains(command.jvmArguments, "-Djava.class.path=/a.jar:/b.jar")
     }
 
     @Test

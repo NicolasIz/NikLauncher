@@ -162,8 +162,11 @@ class LaunchPlannerTest {
             install = install(classpath = listOf(fromManifest)),
             runtime = runtime.copy(providedClasspath = listOf(provided)),
         )
-        val arguments = planned.command.jvmArguments
-        val classpath = arguments[arguments.indexOf("-cp") + 1]
+        // Read out of the property rather than after a -cp: the builder
+        // translates the flag for the Invocation API, which will not take it.
+        val classpath = planned.command.jvmArguments
+            .last { it.startsWith("-Djava.class.path=") }
+            .removePrefix("-Djava.class.path=")
         assertTrue(
             classpath.indexOf(provided.absolutePath) < classpath.indexOf(fromManifest.absolutePath),
             "a replacement jar only wins if it is searched first",
