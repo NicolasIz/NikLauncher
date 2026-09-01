@@ -1280,10 +1280,59 @@ jobs:
 # natives, because org.lwjgl.librarypath is a single directory and is also
 # where LWJGL finds its own libraries - the shape is defined and tested in
 # :core's RuntimePackLayoutTest, and asserted against the real archive below.
+  # Proves the run can publish before anything spends half an hour earning the
+  # right to try. The pack's publish used to be discovered broken at the very
+  # end of a thirty-minute build, and the failure took the previously published
+  # pack with it. This asks the same question of the same token, on a throwaway
+  # tag, in about twenty seconds - and never touches the real release.
+  publish_preflight:
+    name: Check this run may publish
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out NikLauncher
+        uses: actions/checkout@v4
+
+      - name: Create, upload to and delete a throwaway release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          tag="publish-preflight-${GITHUB_RUN_ID}"
+          # An asset, because uploading one is a separate API call from
+          # creating the release and either could be what is refused.
+          head -c 65536 /dev/urandom > preflight.bin
+
+          fail() {
+            echo "::error::$1"
+            echo
+            echo "This run cannot publish a release, so the pack build is not"
+            echo "started. Nothing already published has been touched."
+            gh release delete "$tag" --yes --cleanup-tag >/dev/null 2>&1 || true
+            exit 1
+          }
+
+          gh release create "$tag" preflight.bin \
+            --title "preflight" --notes "throwaway" \
+            --prerelease --target "$GITHUB_SHA" \
+            || fail "cannot create a release with an asset"
+
+          gh release upload "$tag" preflight.bin --clobber \
+            || fail "cannot replace an asset on an existing release"
+
+          gh release delete "$tag" --yes --cleanup-tag \
+            || fail "cannot delete a release"
+
+          echo "this run may publish"
+
   assemble:
     name: Assemble the runtime pack
-    needs: [gl4es, lwjgl, mesa, openjdk]
-    if: ${{ inputs.openjdk }}
+    needs: [gl4es, lwjgl, mesa, openjdk, publish_preflight]
+    # publish_preflight is skipped when not publishing, and a skipped need
+    # would otherwise skip this job too - so it is required only by name and
+    # its own `if` decides whether it runs at all.
+    if: ${{ inputs.openjdk && !failure() && !cancelled() }}
     runs-on: ubuntu-latest
 
     steps:
@@ -1504,11 +1553,32 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          # Recreated so the tag always names the pack currently indexed.
-          gh release delete runtime-packs --yes --cleanup-tag 2>/dev/null || true
-          gh release create runtime-packs \
-            "${{ steps.package.outputs.name }}" runtime-packs.json \
-            --title "NikLauncher runtime packs" \
-            --notes "Built from the sources named in each component.json. The launcher reads runtime-packs.json from this release." \
-            --target "$GITHUB_SHA"
-          gh release view runtime-packs --json url --jq .url
+
+          notes="Built from the sources named in each component.json. The launcher reads runtime-packs.json from this release."
+
+          # Never delete first. The previous version of this step deleted the
+          # release before creating the new one, so when the create failed the
+          # repository was left with no pack at all - every launcher in the
+          # world then asking for a runtime-packs.json that no longer existed.
+          # A failure here must leave what is already published untouched.
+          if gh release view runtime-packs >/dev/null 2>&1; then
+            echo "the release exists; replacing its assets in place"
+            gh release upload runtime-packs \
+              "${{ steps.package.outputs.name }}" runtime-packs.json --clobber
+            gh release edit runtime-packs \
+              --title "NikLauncher runtime packs" --notes "$notes"
+          else
+            echo "no release yet; creating it"
+            gh release create runtime-packs \
+              "${{ steps.package.outputs.name }}" runtime-packs.json \
+              --title "NikLauncher runtime packs" \
+              --notes "$notes" \
+              --target "$GITHUB_SHA"
+          fi
+
+          # Read back what a launcher will actually fetch, rather than trusting
+          # that the upload did what it said.
+          url=$(gh release view runtime-packs --json url --jq .url)
+          echo "published: $url"
+          gh release view runtime-packs --json assets \
+            --jq '.assets[] | "  \(.name)  \(.size) bytes"
