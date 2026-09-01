@@ -70,4 +70,50 @@ object GraphicsProperties {
 
         return properties
     }
+
+    /**
+     * The environment variables a backend's own loader reads.
+     *
+     * Separate from the JVM properties above because nothing Java sees these:
+     * Mesa reads them with getenv from inside its own libraries, long after
+     * the VM has started. That also makes them safe to set from the launcher,
+     * unlike LD_LIBRARY_PATH, which Bionic reads once when the process starts
+     * and never again.
+     *
+     * Zink is the only backend that needs any. Mesa's loader normally picks a
+     * driver by probing the kernel's DRM devices, which an app cannot reach -
+     * so it has to be told the driver by name and where the driver lives, or
+     * eglInitialize fails with nothing useful to say. These are Mesa's own
+     * documented variables; that they are the right ones for this pack is a
+     * conclusion from how the pack is built, not something confirmed on a
+     * device yet.
+     */
+    fun environmentFor(
+        backend: GraphicsBackend,
+        packLibraryDirectory: String,
+        shaderCacheDirectory: String,
+    ): Map<String, String> {
+        val directory = packLibraryDirectory.trimEnd('/')
+        return when (backend) {
+            GraphicsBackend.ZINK -> mapOf(
+                // Where libgallium_dri.so is. Mesa searches this directory for
+                // the driver rather than a system path it has no access to.
+                "LIBGL_DRIVERS_PATH" to directory,
+                // Which driver, by name. The pack builds zink and nothing else,
+                // but "the only one present" is not how the loader chooses.
+                "MESA_LOADER_DRIVER_OVERRIDE" to ZINK_DRIVER,
+                "GALLIUM_DRIVER" to ZINK_DRIVER,
+                // Somewhere writable for compiled shaders, named by the caller
+                // rather than derived here - a path built out of "../.." would
+                // be one rename away from pointing somewhere unintended.
+                // Without a cache Mesa recompiles every shader on every launch,
+                // which on a phone is heat as well as time.
+                "MESA_SHADER_CACHE_DIR" to shaderCacheDirectory.trimEnd('/'),
+            )
+
+            GraphicsBackend.GL4ES, GraphicsBackend.LTW -> emptyMap()
+        }
+    }
+
+    private const val ZINK_DRIVER = "zink"
 }

@@ -18,6 +18,7 @@ import com.niklauncher.core.launch.LaunchAccount
 import com.niklauncher.core.launch.LaunchPlanner
 import com.niklauncher.core.launch.PlannedLaunch
 import com.niklauncher.core.runtime.GraphicsBackend
+import com.niklauncher.core.runtime.GraphicsProperties
 import com.niklauncher.core.runtime.InstalledRuntime
 import com.niklauncher.core.runtime.RuntimePack
 import kotlinx.coroutines.Dispatchers
@@ -220,12 +221,23 @@ class GameSession(
             nativeLibraryDir = File(container.nativeLibraryDir),
             homeDirectory = container.paths.instance(instanceId),
         )
-        return base + mapOf(
-            "LD_LIBRARY_PATH" to listOf(
-                plan.graphicsLibraryDirectory.absolutePath,
-                base["LD_LIBRARY_PATH"].orEmpty(),
-            ).filter { it.isNotEmpty() }.joinToString(":"),
-        )
+        // Shared across instances on purpose: a compiled shader depends on the
+        // driver and the game's own code, not on which world it was compiled
+        // for, so a per-instance cache would just pay the same cost twice.
+        val shaderCache = File(container.paths.cache, "shaders").apply { mkdirs() }
+
+        return base +
+            GraphicsProperties.environmentFor(
+                backend = plan.backend,
+                packLibraryDirectory = plan.graphicsLibraryDirectory.absolutePath,
+                shaderCacheDirectory = shaderCache.absolutePath,
+            ) +
+            mapOf(
+                "LD_LIBRARY_PATH" to listOf(
+                    plan.graphicsLibraryDirectory.absolutePath,
+                    base["LD_LIBRARY_PATH"].orEmpty(),
+                ).filter { it.isNotEmpty() }.joinToString(":"),
+            )
     }
 
     /**
