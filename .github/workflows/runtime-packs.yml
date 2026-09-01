@@ -1581,4 +1581,4 @@ jobs:
           url=$(gh release view runtime-packs --json url --jq .url)
           echo "published: $url"
           gh release view runtime-packs --json assets \
-            --jq '.assets[] | "  \(.name)  \(.size) bytes"
+            --jq '.assets[] | "  " + .name + "  " + (.size | tostring) + " bytes"'
