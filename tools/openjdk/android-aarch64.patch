@@ -552,7 +552,7 @@ index be1ac3f1f..44f37d85c 100644
    LIBJSOUND_CFLAGS := \
        $(ALSA_CFLAGS) \
 diff --git a/make/modules/java.desktop/lib/Awt2dLibraries.gmk b/make/modules/java.desktop/lib/Awt2dLibraries.gmk
-index 341575483..7677f97a7 100644
+index 3415754..802cfce 100644
 --- a/make/modules/java.desktop/lib/Awt2dLibraries.gmk
 +++ b/make/modules/java.desktop/lib/Awt2dLibraries.gmk
 @@ -77,7 +77,7 @@ ifeq ($(call isTargetOs, windows), true)
@@ -620,6 +620,19 @@ index 341575483..7677f97a7 100644
    LIBFONTMANAGER_EXCLUDE_FILES += X11FontScaler.c \
        X11TextRenderer.c \
        fontpath.c \
+@@ -642,7 +675,11 @@ else # not windows
+       JAWT_LIBS += -lawt_xawt
+     else
+       JAWT_LIBS += -lawt_headless
+-      ifeq ($(call isTargetOs, linux), true)
++      # android as well as linux. Without HEADLESS, jawt.c compiles the X11
++      # path and names awt_CreateEmbeddedFrame, which lives in libawt_xawt -
++      # a library a headless build does not produce at all. With it,
++      # JAWT_GetAWT returns JNI_FALSE and references nothing.
++      ifeq ($(call isTargetOs, linux android), true)
+         JAWT_CFLAGS += -DHEADLESS
+       endif
+     endif
 diff --git a/src/hotspot/os/linux/os_linux.cpp b/src/hotspot/os/linux/os_linux.cpp
 index a163b86..906d36a 100644
 --- a/src/hotspot/os/linux/os_linux.cpp
