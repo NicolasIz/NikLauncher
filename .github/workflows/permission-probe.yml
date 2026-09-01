@@ -1,0 +1,33 @@
+# Throwaway. Answers one question: can a workflow_dispatch run create a
+# release, or is the token capped by whatever dispatched it? The pack build
+# takes half an hour and fails at the last step on a 403, which is far too
+# slow a way to learn this. Deleted as soon as it has answered.
+name: Permission probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Try to create and delete a throwaway release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          echo "event: $GITHUB_EVENT_NAME   actor: $GITHUB_ACTOR"
+          echo "--- what the token may do"
+          gh api repos/${GITHUB_REPOSITORY} --jq '.permissions' || true
+          echo "--- create"
+          if gh release create permission-probe --notes "throwaway" --target "$GITHUB_SHA"; then
+            echo "RESULT: releases are writable from a workflow_dispatch run"
+            gh release delete permission-probe --yes --cleanup-tag || true
+          else
+            echo "RESULT: releases are NOT writable from a workflow_dispatch run"
+          fi
