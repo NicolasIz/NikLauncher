@@ -723,6 +723,22 @@ jobs:
           git apply "$patch_file"
           echo "patch applied cleanly"
 
+          # The recurring defect in this port: OpenJDK writes per-OS files and
+          # variables and looks them up by suffixing $(OPENJDK_TARGET_OS),
+          # which is "android" and matches nothing - so the linux ones are
+          # skipped in silence and the build still succeeds. It cost a VM that
+          # would not start on a missing JVM_IsUseContainerSupport. Every
+          # remaining lookup of that shape is listed here so the next one is
+          # found by reading rather than by a device.
+          echo
+          echo "===== file lookups still keyed on OPENJDK_TARGET_OS ====="
+          grep -rn 'wildcard.*OPENJDK_TARGET_OS)' make/ 2>/dev/null \
+            | grep -v OPENJDK_TARGET_OS_ || echo "  none"
+          echo
+          echo "===== isTargetOs tests that name linux but not android ====="
+          grep -rn 'isTargetOs, linux' make/ 2>/dev/null \
+            | grep -v android || echo "  none"
+
       # Android's build variables now resolve to the linux ones, and LIBS_linux
       # names -lpthread. Bionic keeps pthread inside libc, so whether that links
       # depends on the NDK still shipping a compatibility stub. Printed rather
@@ -896,6 +912,49 @@ jobs:
             done
           done < <(find out/jdk -name '*.so')
           [ "$bad" -eq 0 ] || exit 1
+
+          # libjvm has to export every symbol the mapfile promises, and the
+          # mapfile is assembled from these lists. A build that quietly drops
+          # one of them links, packages and ships, and then fails at VM
+          # startup with "cannot locate symbol" - which is exactly how
+          # symbols-linux went missing for android. Checked against the
+          # upstream lists rather than a copy, so it cannot drift.
+          # The version tag has to come off both sides. HotSpot's exports are
+          # tagged @@SUNWprivate_1.1 and the references to them @SUNWprivate_1.1,
+          # so comparing the raw names finds nothing in common and reports the
+          # whole library missing - which is what a first pass at this check did.
+          nm=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm
+          "$nm" -D --defined-only out/jdk/lib/server/libjvm.so \
+            | awk '$2 ~ /^[TWDB]$/ {print $3}' | sed 's/@.*//' | sort -u > exported.txt
+
+          missing=0
+          for list in symbols-shared symbols-unix symbols-linux; do
+            file=upstream-jdk/make/data/hotspot-symbols/$list
+            [ -f "$file" ] || continue
+            while read -r symbol; do
+              case "$symbol" in ''|\#*) continue ;; esac
+              if ! grep -qx "$symbol" exported.txt; then
+                echo "libjvm.so does not export $symbol, promised by $list" >&2
+                missing=$((missing + 1))
+              fi
+            done < "$file"
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "$missing promised symbol(s) missing; the VM would fail to start" >&2
+            exit 1
+          fi
+          echo "libjvm exports every symbol the mapfile lists"
+
+          # And the other direction, on the library that found the gap: every
+          # undefined JVM_ symbol libjava names must be one libjvm defines.
+          "$nm" -D --undefined-only out/jdk/lib/libjava.so \
+            | awk '{print $2}' | sed 's/@.*//' | grep '^JVM_' | sort -u > wanted.txt
+          if ! comm -23 wanted.txt exported.txt | grep .; then
+            echo "libjava's JVM_ references all resolve against libjvm"
+          else
+            echo "libjava references JVM_ symbols libjvm does not export" >&2
+            exit 1
+          fi
           echo "every shared object is 16 KB aligned"
 
           echo "runtime size: $(du -sh out/jdk | cut -f1)"

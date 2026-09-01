@@ -440,10 +440,35 @@ index 1fadd5331..6e1449306 100644
      $(patsubst %,-I%,$(JVM_SRC_DIRS)) \
      -I$(TOPDIR)/src/hotspot/share/precompiled \
 diff --git a/make/hotspot/lib/JvmMapfile.gmk b/make/hotspot/lib/JvmMapfile.gmk
-index b2199e7d1..d80754a93 100644
+index b2199e7..95d513a 100644
 --- a/make/hotspot/lib/JvmMapfile.gmk
 +++ b/make/hotspot/lib/JvmMapfile.gmk
-@@ -52,7 +52,7 @@ endif
+@@ -38,13 +38,20 @@ ifeq ($(call isTargetOsType, unix), true)
+   SYMBOLS_SRC += $(TOPDIR)/make/data/hotspot-symbols/symbols-unix
+ endif
+ 
+-ifneq ($(wildcard $(TOPDIR)/make/data/hotspot-symbols/symbols-$(OPENJDK_TARGET_OS)), )
+-  SYMBOLS_SRC += $(TOPDIR)/make/data/hotspot-symbols/symbols-$(OPENJDK_TARGET_OS)
++# Looked up under OPENJDK_TARGET_OS_VARIANT rather than OPENJDK_TARGET_OS, so
++# that an android build reads symbols-linux. There is no symbols-android and
++# there should not be: Android is Linux underneath, and these are the symbols
++# the Linux HotSpot exports - among them JVM_IsUseContainerSupport, which
++# libjava references unconditionally and so fails to resolve at VM startup.
++# The wildcard is what makes getting this wrong silent: a file that is not
++# there is skipped, the build succeeds, and only the device finds out.
++ifneq ($(wildcard $(TOPDIR)/make/data/hotspot-symbols/symbols-$(OPENJDK_TARGET_OS_VARIANT)), )
++  SYMBOLS_SRC += $(TOPDIR)/make/data/hotspot-symbols/symbols-$(OPENJDK_TARGET_OS_VARIANT)
+ endif
+ 
+ ifneq ($(findstring debug, $(DEBUG_LEVEL)), )
+-  ifneq ($(wildcard $(TOPDIR)/make/data/hotspot-symbols/symbols-$(OPENJDK_TARGET_OS)-debug), )
+-    SYMBOLS_SRC += $(TOPDIR)/make/data/hotspot-symbols/symbols-$(OPENJDK_TARGET_OS)-debug
++  ifneq ($(wildcard $(TOPDIR)/make/data/hotspot-symbols/symbols-$(OPENJDK_TARGET_OS_VARIANT)-debug), )
++    SYMBOLS_SRC += $(TOPDIR)/make/data/hotspot-symbols/symbols-$(OPENJDK_TARGET_OS_VARIANT)-debug
+   endif
+ endif
+ 
+@@ -52,7 +59,7 @@ endif
  # Create a dynamic list of symbols from the built object files. This is highly
  # platform dependent.
  
