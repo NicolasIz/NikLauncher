@@ -621,26 +621,10 @@ index 341575483..7677f97a7 100644
        X11TextRenderer.c \
        fontpath.c \
 diff --git a/src/hotspot/os/linux/os_linux.cpp b/src/hotspot/os/linux/os_linux.cpp
-index a163b86..14d2bb8 100644
+index a163b86..906d36a 100644
 --- a/src/hotspot/os/linux/os_linux.cpp
 +++ b/src/hotspot/os/linux/os_linux.cpp
-@@ -141,9 +141,13 @@
- // for timer info max values which include all bits
- #define ALL_64_BITS CONST64(0xFFFFFFFFFFFFFFFF)
- 
--#ifdef MUSL_LIBC
-+#if defined(MUSL_LIBC) || defined(__ANDROID__)
- // dlvsym is not a part of POSIX
--// and musl libc doesn't implement it.
-+// and neither musl libc nor Bionic implements it. Bionic is in exactly the
-+// position musl is in here, so it takes the same answer: the unversioned
-+// symbol. Only libnuma is looked up this way, and a phone has no NUMA nodes,
-+// so the lookup fails either way - it just now fails at dlsym instead of at
-+// load time, taking the whole VM with it.
- static void *dlvsym(void *handle,
-                     const char *symbol,
-                     const char *version) {
-@@ -591,12 +595,17 @@ void os::init_system_properties_values() {
+@@ -591,12 +591,17 @@ void os::init_system_properties_values() {
  
  void os::Linux::libpthread_init() {
    // Save glibc and pthread version strings.
@@ -661,7 +645,7 @@ index a163b86..14d2bb8 100644
    // confstr() from musl libc returns EINVAL for
    // _CS_GNU_LIBC_VERSION and _CS_GNU_LIBPTHREAD_VERSION
    os::Linux::set_libc_version("musl - unknown");
-@@ -1900,15 +1909,22 @@ void * os::Linux::dll_load_in_vmthread(const char *filename, char *ebuf,
+@@ -1900,15 +1905,22 @@ void * os::Linux::dll_load_in_vmthread(const char *filename, char *ebuf,
  }
  
  const char* os::Linux::dll_path(void* lib) {
