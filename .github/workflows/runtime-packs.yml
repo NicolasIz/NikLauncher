@@ -955,6 +955,60 @@ jobs:
             echo "libjava references JVM_ symbols libjvm does not export" >&2
             exit 1
           fi
+
+          # Every undefined symbol in the runtime, against everything that can
+          # actually satisfy one on a phone: the runtime itself, plus Bionic
+          # and the rest of the NDK's own libraries.
+          #
+          # This is the check that matters most here, because the JDK is built
+          # with -DLINUX and that switches on code written for glibc. Bionic is
+          # not glibc: __xpg_strerror_r does not exist there, nor does dlvsym,
+          # and each one only announced itself when a phone refused to load the
+          # library that named it - one symbol per half-hour round. The linker
+          # reports the first missing symbol and stops, so finding them by
+          # running is finding them one at a time. Here they all appear at once.
+          sysroot=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/sysroot
+          stubs=$sysroot/usr/lib/aarch64-linux-android/${ANDROID_API}
+          echo "--- platform stubs: $stubs"
+
+          find "$stubs" -maxdepth 1 -name '*.so' -exec \
+            "$nm" -D --defined-only {} \; 2>/dev/null \
+            | awk '$2 ~ /^[TWDBRiV]$/ {print $3}' | sed 's/@.*//' | sort -u > platform.txt
+          echo "    the platform defines $(grep -c . platform.txt) symbols"
+
+          find out/jdk -name '*.so' -exec "$nm" -D --defined-only {} \; 2>/dev/null \
+            | awk '$2 ~ /^[TWDBRiV]$/ {print $3}' | sed 's/@.*//' | sort -u > runtime.txt
+          find out/jdk -name '*.so' -exec "$nm" -D --undefined-only {} \; 2>/dev/null \
+            | awk '{print $2}' | sed 's/@.*//' | sort -u > needed.txt
+
+          # The C++ runtime is shipped alongside the JDK by the assemble job,
+          # so its symbols count as available even though it is not in the
+          # image at this point.
+          libcxx=$(find "$ANDROID_NDK_ROOT" -name 'libc++_shared.so' \
+            -path '*aarch64-linux-android*' | head -n 1)
+          "$nm" -D --defined-only "$libcxx" \
+            | awk '$2 ~ /^[TWDBRiV]$/ {print $3}' | sed 's/@.*//' | sort -u >> runtime.txt
+          sort -u runtime.txt -o runtime.txt
+
+          cat runtime.txt platform.txt | sort -u > available.txt
+          comm -23 needed.txt available.txt > glibcisms.txt
+
+          if [ -s glibcisms.txt ]; then
+            echo
+            echo "these are referenced by the runtime and defined nowhere it can reach:" >&2
+            while read -r symbol; do
+              printf '  %-32s wanted by ' "$symbol" >&2
+              find out/jdk -name '*.so' | while read -r so; do
+                "$nm" -D --undefined-only "$so" 2>/dev/null | sed 's/@.*//' \
+                  | grep -qw "$symbol" && printf '%s ' "$(basename "$so")" >&2
+              done
+              echo >&2
+            done < glibcisms.txt
+            echo >&2
+            echo "each one fails a dlopen on the device, one per launch attempt" >&2
+            exit 1
+          fi
+          echo "every symbol the runtime references resolves on a Bionic system"
           echo "every shared object is 16 KB aligned"
 
           echo "runtime size: $(du -sh out/jdk | cut -f1)"

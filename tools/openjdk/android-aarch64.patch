@@ -621,10 +621,26 @@ index 341575483..7677f97a7 100644
        X11TextRenderer.c \
        fontpath.c \
 diff --git a/src/hotspot/os/linux/os_linux.cpp b/src/hotspot/os/linux/os_linux.cpp
-index a163b8648..906d36aae 100644
+index a163b86..14d2bb8 100644
 --- a/src/hotspot/os/linux/os_linux.cpp
 +++ b/src/hotspot/os/linux/os_linux.cpp
-@@ -591,12 +591,17 @@ void os::init_system_properties_values() {
+@@ -141,9 +141,13 @@
+ // for timer info max values which include all bits
+ #define ALL_64_BITS CONST64(0xFFFFFFFFFFFFFFFF)
+ 
+-#ifdef MUSL_LIBC
++#if defined(MUSL_LIBC) || defined(__ANDROID__)
+ // dlvsym is not a part of POSIX
+-// and musl libc doesn't implement it.
++// and neither musl libc nor Bionic implements it. Bionic is in exactly the
++// position musl is in here, so it takes the same answer: the unversioned
++// symbol. Only libnuma is looked up this way, and a phone has no NUMA nodes,
++// so the lookup fails either way - it just now fails at dlsym instead of at
++// load time, taking the whole VM with it.
+ static void *dlvsym(void *handle,
+                     const char *symbol,
+                     const char *version) {
+@@ -591,12 +595,17 @@ void os::init_system_properties_values() {
  
  void os::Linux::libpthread_init() {
    // Save glibc and pthread version strings.
@@ -645,7 +661,7 @@ index a163b8648..906d36aae 100644
    // confstr() from musl libc returns EINVAL for
    // _CS_GNU_LIBC_VERSION and _CS_GNU_LIBPTHREAD_VERSION
    os::Linux::set_libc_version("musl - unknown");
-@@ -1900,15 +1905,22 @@ void * os::Linux::dll_load_in_vmthread(const char *filename, char *ebuf,
+@@ -1900,15 +1909,22 @@ void * os::Linux::dll_load_in_vmthread(const char *filename, char *ebuf,
  }
  
  const char* os::Linux::dll_path(void* lib) {
@@ -737,3 +753,22 @@ index ceea38f43..120e14beb 100644
  typedef struct {
      int x;
      int y;
+diff --git a/src/java.base/unix/native/libjava/jni_util_md.c b/src/java.base/unix/native/libjava/jni_util_md.c
+index 32b477a..97f4590 100644
+--- a/src/java.base/unix/native/libjava/jni_util_md.c
++++ b/src/java.base/unix/native/libjava/jni_util_md.c
+@@ -31,7 +31,13 @@
+ #include "jni_util.h"
+ #include "dlfcn.h"
+ 
+-#if defined(LINUX) && (defined(_GNU_SOURCE) || \
++// Not on Android. This redirect exists because glibc's default strerror_r is
++// the GNU one, which returns char* - so the XSI version has to be reached
++// under its internal name. Bionic has only one strerror_r and it is already
++// the XSI one, returning int, so the redirect names a symbol that does not
++// exist and libjava fails to load. The build defines LINUX for Android, which
++// is what brings this branch into play.
++#if defined(LINUX) && !defined(__ANDROID__) && (defined(_GNU_SOURCE) || \
+          (defined(_POSIX_C_SOURCE) && _POSIX_C_SOURCE < 200112L \
+              && defined(_XOPEN_SOURCE) && _XOPEN_SOURCE < 600))
+ extern int __xpg_strerror_r(int, char *, size_t);
