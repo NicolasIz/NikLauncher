@@ -194,6 +194,14 @@ class GameSession(
         // three runs points at whichever one printed last, which is not
         // necessarily this one.
         val log = logs.beginSession(instanceId)
+
+        // The system's own account of this process, captured alongside. A
+        // native crash never reaches the VM's output - the process is gone
+        // before anything flushes - and the session log simply stops, which
+        // says only that something went wrong somewhere. The kernel writes
+        // the signal and the fault address to the system log instead, and an
+        // app is allowed to read back its own lines.
+        val systemLog = startSystemLogCapture()
         val result = JvmBridge.launch(
             runtime = installed,
             command = plan.command,
@@ -202,6 +210,16 @@ class GameSession(
             workingDirectory = plan.gameDirectory,
         )
 
+        systemLog?.destroy()
+
+        // Written only if the VM's main actually returned. Its absence is the
+        // signal: a log that stops with no last line is a process that was
+        // killed rather than one that finished, and telling those apart is
+        // otherwise guesswork.
+        runCatching {
+            log.appendText("\n[NikLauncher] the game's main returned: $result\n")
+        }
+
         if (result is JvmBridge.Result.Failed) {
             // The path matters as much as the reason: what HotSpot or Minecraft
             // said is in there, and the reason alone is often just "it did not
@@ -209,6 +227,23 @@ class GameSession(
             _state.value = GameState.Failed(result.reason, logs.tail(log), log)
         }
     }
+
+    /**
+     * Reads this process's own system log into a file beside the session's.
+     *
+     * Only our own lines: that is all an app may see, and all that is wanted.
+     * Returns null when the capture cannot start, which costs the extra
+     * diagnosis and nothing else - the launch goes ahead either way.
+     */
+    private fun startSystemLogCapture(): Process? = runCatching {
+        val file = logs.beginSystemLog(instanceId)
+        ProcessBuilder(
+            "logcat", "--pid=" + android.os.Process.myPid(), "-v", "threadtime", "*:V",
+        )
+            .redirectErrorStream(true)
+            .redirectOutput(file)
+            .start()
+    }.onFailure { Log.w(TAG, "Could not capture the system log", it) }.getOrNull()
 
     /**
      * The backend's own directory goes on LD_LIBRARY_PATH as well: Mesa's

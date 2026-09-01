@@ -112,4 +112,28 @@ class SessionLogsTest {
     fun `a log that is not there is not an error`() {
         assertNull(logs.tail(File(directory, "session-missing.log")))
     }
+
+    /**
+     * The system log is listed and rotated like the session's own, because it
+     * is the half that survives a native crash - the VM's output stops mid
+     * sentence, and what killed the process is only in this one.
+     */
+    @Test
+    fun `the system log is kept beside the session's own`() {
+        val session = logs.beginSession("alpha").apply { writeText("vm output\n") }
+        val system = logs.beginSystemLog("alpha").apply { writeText("F DEBUG: signal 11\n") }
+
+        assertTrue(session != system, "they must be separate files")
+        val names = logs.all().map { it.name }.toSet()
+        assertEquals(setOf("session-alpha.log", "session-alpha.system.log"), names)
+    }
+
+    @Test
+    fun `the system log rotates on its own`() {
+        logs.beginSystemLog("alpha").writeText("first\n")
+        logs.beginSystemLog("alpha").writeText("second\n")
+
+        assertEquals("first\n", File(directory, "session-alpha.system.log.1").readText())
+        assertEquals("second\n", File(directory, "session-alpha.system.log").readText())
+    }
 }

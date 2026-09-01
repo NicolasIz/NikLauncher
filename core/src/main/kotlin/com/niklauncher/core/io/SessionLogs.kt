@@ -37,8 +37,21 @@ class SessionLogs(private val directory: File) {
      * just happened. The run before is kept: a session that dies on startup is
      * often explained by what the previous one did.
      */
-    fun beginSession(instanceId: String): File {
-        val log = logFor(instanceId)
+    fun beginSession(instanceId: String): File = begin(logFor(instanceId))
+
+    /**
+     * The companion file holding what the system had to say about this
+     * process.
+     *
+     * A native crash writes nothing to the VM's own output: the process is
+     * gone before anything can be flushed, and the log simply stops mid
+     * startup with no complaint - which is the least useful state a failure
+     * can be in. The kernel's account of it goes to the system log instead,
+     * so that is captured beside the session's own.
+     */
+    fun beginSystemLog(instanceId: String): File = begin(systemLogFor(instanceId))
+
+    private fun begin(log: File): File {
         log.parentFile?.mkdirs()
         if (log.isFile) {
             val kept = previousOf(log)
@@ -49,6 +62,8 @@ class SessionLogs(private val directory: File) {
     }
 
     fun logFor(instanceId: String): File = File(directory, "session-$instanceId.log")
+
+    fun systemLogFor(instanceId: String): File = File(directory, "session-$instanceId.system.log")
 
     /** Every session log, newest first, so "the last one" needs no bookkeeping. */
     fun all(): List<Entry> {
