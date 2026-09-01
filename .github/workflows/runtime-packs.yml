@@ -978,8 +978,27 @@ jobs:
 
           find out/jdk -name '*.so' -exec "$nm" -D --defined-only {} \; 2>/dev/null \
             | awk '$2 ~ /^[TWDBRiV]$/ {print $3}' | sed 's/@.*//' | sort -u > runtime.txt
-          find out/jdk -name '*.so' -exec "$nm" -D --undefined-only {} \; 2>/dev/null \
-            | awk '{print $2}' | sed 's/@.*//' | sort -u > needed.txt
+
+          # Strong undefined symbols only. A weak one is allowed to be absent -
+          # the loader leaves it null and the caller checks before using it,
+          # which is exactly what HotSpot does with collector_func_load, the
+          # profiler hook it will use only if something provides one. Counting
+          # weak references as missing fails the build over a library that
+          # loads perfectly well.
+          #
+          # Built as symbol-and-library pairs in one pass, rather than
+          # re-reading every library once per symbol to name it later. That
+          # reporting loop let grep close the pipe early and killed itself on
+          # SIGPIPE partway through the list - which defeats the whole purpose,
+          # since seeing every one at once is why this check exists.
+          : > wanted-by.txt
+          while read -r so; do
+            "$nm" -D --undefined-only "$so" 2>/dev/null \
+              | awk -v lib="$(basename "$so")" \
+                  '$1 == "U" { sub(/@.*/, "", $2); print $2 " " lib }' >> wanted-by.txt
+          done < <(find out/jdk -name '*.so')
+          sort -u -o wanted-by.txt wanted-by.txt
+          awk '{print $1}' wanted-by.txt | sort -u > needed.txt
 
           # The C++ runtime is shipped alongside the JDK by the assemble job,
           # so its symbols count as available even though it is not in the
@@ -997,12 +1016,8 @@ jobs:
             echo
             echo "these are referenced by the runtime and defined nowhere it can reach:" >&2
             while read -r symbol; do
-              printf '  %-32s wanted by ' "$symbol" >&2
-              find out/jdk -name '*.so' | while read -r so; do
-                "$nm" -D --undefined-only "$so" 2>/dev/null | sed 's/@.*//' \
-                  | grep -qw "$symbol" && printf '%s ' "$(basename "$so")" >&2
-              done
-              echo >&2
+              printf '  %-32s wanted by %s\n' "$symbol" \
+                "$(awk -v s="$symbol" '$1 == s { printf "%s ", $2 }' wanted-by.txt)" >&2
             done < glibcisms.txt
             echo >&2
             echo "each one fails a dlopen on the device, one per launch attempt" >&2
