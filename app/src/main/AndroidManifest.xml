@@ -11,6 +11,16 @@
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.hardware.gamepad" android:required="false" />
 
+    <!--
+        allowNativeHeapPointerTagging is off because HotSpot cannot live with
+        it. From Android 11 malloc returns pointers carrying a tag in the top
+        byte, and free rejects one that comes back without it - the device
+        reported "Pointer tag for 0x6f34df0f00 was truncated" and the VM died
+        there. HotSpot stores and reconstructs pointers in ways that do not
+        preserve that byte: compressed oops, mark words, the card table. This
+        is the escape hatch Android documents for exactly that, and it costs
+        only a heap hardening feature that a JVM was never going to satisfy.
+    -->
     <application
         android:name=".NikLauncherApplication"
         android:allowBackup="false"
@@ -21,6 +31,7 @@
         android:supportsRtl="true"
         android:largeHeap="true"
         android:hardwareAccelerated="true"
+        android:allowNativeHeapPointerTagging="false"
         android:theme="@style/Theme.NikLauncher">
 
         <activity
